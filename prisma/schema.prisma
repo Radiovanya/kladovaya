@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  ACCOUNTANT
+}
+
+enum UnitType {
+  STORAGE
+  GARAGE
+  BOX
+}
+
+enum UnitStatus {
+  FREE
+  RESERVED
+  OCCUPIED
+  MAINTENANCE
+  ARCHIVED
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
+enum ChargeType {
+  RENT
+  DEPOSIT
+  PENALTY
+  OTHER
+}
+
+enum ChargeStatus {
+  PENDING
+  PAID
+  PARTIAL
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  SBP
+  CARD
+  OTHER
+}
+
+enum DocumentEntityType {
+  CUSTOMER
+  CONTRACT
+  PAYMENT
+}
+
+enum DocumentType {
+  CONTRACT_SCAN
+  RECEIPT
+  INVOICE
+  OTHER
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  tasks        Task[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Location {
+  id          Int      @id @default(autoincrement())
+  name        String
+  address     String
+  description String   @default("")
+  isActive    Boolean  @default(true)
+  units       Unit[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Unit {
+  id            Int        @id @default(autoincrement())
+  locationId    Int
+  location      Location   @relation(fields: [locationId], references: [id])
+  unitNumber    String
+  unitType      UnitType
+  areaSqm       Decimal    @db.Decimal(10, 2)
+  monthlyRate   Decimal    @db.Decimal(12, 2)
+  depositAmount Decimal    @db.Decimal(12, 2)
+  status        UnitStatus @default(FREE)
+  note          String     @default("")
+  contracts     Contract[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([locationId, unitNumber])
+  @@index([locationId, status])
+}
+
+model Customer {
+  id                         Int          @id @default(autoincrement())
+  customerType               CustomerType
+  fullName                   String
+  phone                      String
+  email                      String
+  passportOrRegistrationData String
+  taxId                      String
+  address                    String
+  note                       String       @default("")
+  contracts                  Contract[]
+  payments                   Payment[]
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+
+  @@index([fullName])
+  @@index([phone])
+}
+
+model Contract {
+  id                Int            @id @default(autoincrement())
+  customerId        Int
+  customer          Customer       @relation(fields: [customerId], references: [id])
+  unitId            Int
+  unit              Unit           @relation(fields: [unitId], references: [id])
+  contractNumber    String         @unique
+  startDate         DateTime       @db.Date
+  endDate           DateTime       @db.Date
+  monthlyRate       Decimal        @db.Decimal(12, 2)
+  depositAmount     Decimal        @db.Decimal(12, 2)
+  billingDay        Int
+  status            ContractStatus @default(DRAFT)
+  terminationReason String         @default("")
+  note              String         @default("")
+  charges           Charge[]
+  payments          Payment[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([unitId, status, startDate, endDate])
+  @@index([customerId, status])
+}
+
+model Charge {
+  id          Int          @id @default(autoincrement())
+  contractId  Int
+  contract    Contract     @relation(fields: [contractId], references: [id])
+  periodStart DateTime     @db.Date
+  periodEnd   DateTime     @db.Date
+  dueDate     DateTime     @db.Date
+  amount      Decimal      @db.Decimal(12, 2)
+  chargeType  ChargeType
+  status      ChargeStatus @default(PENDING)
+  note        String       @default("")
+  payments    Payment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([contractId, dueDate, status])
+}
+
+model Payment {
+  id              Int           @id @default(autoincrement())
+  customerId      Int
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  contractId      Int
+  contract        Contract      @relation(fields: [contractId], references: [id])
+  chargeId        Int?
+  charge          Charge?       @relation(fields: [chargeId], references: [id])
+  paymentDate     DateTime      @db.Date
+  amount          Decimal       @db.Decimal(12, 2)
+  paymentMethod   PaymentMethod
+  referenceNumber String
+  comment         String        @default("")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([contractId, paymentDate])
+  @@index([chargeId])
+}
+
+model Document {
+  id           Int                @id @default(autoincrement())
+  entityType   DocumentEntityType
+  entityId     Int
+  fileName     String
+  fileUrl      String
+  documentType DocumentType
+  createdAt    DateTime           @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model Task {
+  id                  Int          @id @default(autoincrement())
+  title               String
+  description         String       @default("")
+  dueDate              DateTime
+  priority             TaskPriority
+  status               TaskStatus   @default(OPEN)
+  relatedEntityType    String?
+  relatedEntityId      Int?
+  assignedToUserId    Int?
+  assignedToUser      User?        @relation(fields: [assignedToUserId], references: [id])
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@index([status, dueDate])
+  @@index([relatedEntityType, relatedEntityId])
+}
