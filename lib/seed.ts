@@ -1,6 +1,17 @@
 import type { AppData } from "./types";
 
 export const seedData: AppData = {
+  paymentSettings: {
+    bankName: "Т-Банк",
+    recipientName: "",
+    taxId: "",
+    kpp: "",
+    accountNumber: "",
+    bic: "",
+    correspondentAccount: "",
+    receiptEmail: ""
+  },
+  paymentRequests: [],
   locations: [
     { id: 1, name: "Северная, 12", address: "Санкт-Петербург, ул. Северная, 12", description: "Основной складской комплекс", isActive: true },
     { id: 2, name: "Промышленная, 7", address: "Санкт-Петербург, ул. Промышленная, 7", description: "Боксы и кладовки", isActive: true },

@@ -87,6 +87,13 @@ enum TaskStatus {
   DONE
 }
 
+enum PaymentRequestStatus {
+  PREPARED
+  SENT
+  PAID
+  EXPIRED
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   name         String
@@ -165,11 +172,41 @@ model Contract {
   note              String         @default("")
   charges           Charge[]
   payments          Payment[]
+  paymentRequests   PaymentRequest[]
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
   @@index([unitId, status, startDate, endDate])
   @@index([customerId, status])
+}
+
+model PaymentSettings {
+  id                    Int      @id @default(1)
+  bankName              String   @default("Т-Банк")
+  recipientName         String
+  taxId                 String
+  kpp                   String   @default("")
+  accountNumber         String
+  bic                    String
+  correspondentAccount  String
+  receiptEmail          String   @default("")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model PaymentRequest {
+  id             Int                  @id @default(autoincrement())
+  contractId     Int
+  contract       Contract             @relation(fields: [contractId], references: [id])
+  period         String
+  amount         Decimal              @db.Decimal(12, 2)
+  purpose        String
+  recipientEmail String
+  status         PaymentRequestStatus @default(PREPARED)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([contractId, period, status])
 }
 
 model Charge {

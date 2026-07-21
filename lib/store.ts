@@ -14,7 +14,15 @@ export function useAppStore() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setData(JSON.parse(stored) as AppData);
+      if (stored) {
+        const parsed = JSON.parse(stored) as AppData;
+        setData({
+          ...cloneSeed(),
+          ...parsed,
+          paymentSettings: { ...seedData.paymentSettings!, ...(parsed.paymentSettings ?? {}) },
+          paymentRequests: parsed.paymentRequests ?? []
+        });
+      }
     } finally {
       setReady(true);
     }

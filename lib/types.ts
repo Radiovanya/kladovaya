@@ -39,8 +39,18 @@ export interface DocumentItem {
 export interface User {
   id: number; name: string; email: string; role: Role; isActive: boolean;
 }
+export interface PaymentSettings {
+  bankName: string; recipientName: string; taxId: string; kpp: string; accountNumber: string;
+  bic: string; correspondentAccount: string; receiptEmail: string;
+}
+export interface PaymentRequest {
+  id: number; contractId: number; period: string; amount: number; purpose: string;
+  recipientEmail: string; status: "prepared" | "sent" | "paid" | "expired"; createdAt: string;
+}
 export interface AppData {
   locations: Location[]; units: Unit[]; customers: Customer[]; contracts: Contract[];
   charges: Charge[]; payments: Payment[]; tasks: Task[]; documents: DocumentItem[]; users: User[];
   archivedIds?: Record<string, number[]>;
+  paymentSettings?: PaymentSettings;
+  paymentRequests?: PaymentRequest[];
 }

@@ -1,4 +1,4 @@
-import type { AppData, ChargeStatus, Contract, UnitStatus } from "./types";
+import type { AppData, ChargeStatus, Contract, PaymentSettings, UnitStatus } from "./types";
 
 export const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
@@ -64,4 +64,44 @@ export function dashboardMetrics(data: AppData, now = new Date()) {
       contract.status === "active" && new Date(contract.endDate) >= now && new Date(contract.endDate) <= inThirtyDays
     ).length
   };
+}
+
+const cleanQrValue = (value: string) => value.replace(/[|]/g, " ").trim();
+
+export function paymentPeriodLabel(period: string) {
+  const [year, month] = period.split("-").map(Number);
+  if (!year || !month) throw new Error("Некорректный месяц оплаты");
+  return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+
+export function paymentPurpose(contractNumber: string, period: string) {
+  return `Оплата аренды по договору ${cleanQrValue(contractNumber)} за ${paymentPeriodLabel(period)}, без НДС`;
+}
+
+export function hasCompletePaymentSettings(settings: PaymentSettings) {
+  return Boolean(
+    settings.recipientName.trim() &&
+    /^(?:\d{10}|\d{12})$/.test(settings.taxId.trim()) &&
+    /^\d{20}$/.test(settings.accountNumber.trim()) &&
+    /^\d{9}$/.test(settings.bic.trim()) &&
+    /^\d{20}$/.test(settings.correspondentAccount.trim())
+  );
+}
+
+export function buildPaymentQrPayload(settings: PaymentSettings, amount: number, purpose: string) {
+  if (!hasCompletePaymentSettings(settings)) throw new Error("Заполните платёжные реквизиты");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Сумма должна быть больше нуля");
+  const fields = [
+    "ST00012",
+    `Name=${cleanQrValue(settings.recipientName)}`,
+    `PersonalAcc=${cleanQrValue(settings.accountNumber)}`,
+    `BankName=${cleanQrValue(settings.bankName)}`,
+    `BIC=${cleanQrValue(settings.bic)}`,
+    `CorrespAcc=${cleanQrValue(settings.correspondentAccount)}`,
+    `PayeeINN=${cleanQrValue(settings.taxId)}`,
+    settings.kpp.trim() ? `KPP=${cleanQrValue(settings.kpp)}` : "",
+    `Sum=${Math.round(amount * 100)}`,
+    `Purpose=${cleanQrValue(purpose)}`
+  ].filter(Boolean);
+  return fields.join("|");
 }

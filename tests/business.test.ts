@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateChargeStatus, dashboardMetrics, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, paymentPurpose, unitStatus, validateActiveContract } from "../lib/business";
 import { seedData } from "../lib/seed";
 
 test("начисление становится partial при частичной оплате до срока", () => {
@@ -34,4 +34,31 @@ test("dashboard исключает архивные юниты и считает
   assert.equal(metrics.occupiedUnits, 3);
   assert.equal(metrics.overdueChargesCount, 2);
   assert.equal(metrics.overdueAmount, 20500);
+});
+
+test("назначение QR содержит договор и оплачиваемый месяц", () => {
+  assert.equal(paymentPurpose("Д-2026-014", "2026-08"), "Оплата аренды по договору Д-2026-014 за август 2026 г., без НДС");
+});
+
+test("QR ST00012 содержит сумму в копейках и банковские реквизиты", () => {
+  const settings = {
+    bankName: "Т-Банк", recipientName: "ООО Кладовая", taxId: "7812345678", kpp: "781201001",
+    accountNumber: "40702810900000000001", bic: "044525974",
+    correspondentAccount: "30101810145250000974", receiptEmail: "payments@example.ru"
+  };
+  assert.equal(hasCompletePaymentSettings(settings), true);
+  const payload = buildPaymentQrPayload(settings, 6500, paymentPurpose("Д-2026-014", "2026-08"));
+  assert.match(payload, /^ST00012\|/);
+  assert.match(payload, /\|Sum=650000\|/);
+  assert.match(payload, /\|PersonalAcc=40702810900000000001\|/);
+  assert.match(payload, /Д-2026-014/);
+});
+
+test("платёжный QR не формируется без настоящих реквизитов", () => {
+  const settings = {
+    bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "",
+    accountNumber: "", bic: "", correspondentAccount: "", receiptEmail: ""
+  };
+  assert.equal(hasCompletePaymentSettings(settings), false);
+  assert.throws(() => buildPaymentQrPayload(settings, 6500, "Аренда"), /Заполните платёжные реквизиты/);
 });

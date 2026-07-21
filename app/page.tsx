@@ -2,15 +2,16 @@
 
 import {
   Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
-  Eye, EyeOff, FileText, LayoutDashboard, LogOut, MapPin, Menu, Pencil, Plus, Save,
-  Search, Settings, Users, Warehouse, X
+  Copy, CreditCard, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin,
+  Menu, Pencil, Plus, QrCode, Save, Search, Settings, Users, Warehouse, X
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, money, unitStatus, validateActiveContract } from "@/lib/business";
+import QRCode from "qrcode";
+import { useEffect, useMemo, useState } from "react";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, paymentPeriodLabel, paymentPurpose, unitStatus, validateActiveContract } from "@/lib/business";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, Role } from "@/lib/types";
+import type { AppData, Contract, PaymentSettings, Role } from "@/lib/types";
 
-type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "users";
+type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
 type EntityType = Page | "documents";
 type Modal = null | { type: EntityType; id?: number };
 
@@ -23,6 +24,7 @@ const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "charges", label: "Начисления", icon: CircleDollarSign },
   { id: "payments", label: "Оплаты", icon: Banknote },
   { id: "tasks", label: "Задачи", icon: CheckSquare },
+  { id: "payment-settings", label: "Реквизиты", icon: CreditCard },
   { id: "users", label: "Пользователи", icon: Settings }
 ];
 
@@ -35,6 +37,7 @@ const titles: Record<Page, [string, string]> = {
   charges: ["Начисления", "Обязательства по договорам"],
   payments: ["Оплаты", "Зарегистрированные поступления"],
   tasks: ["Задачи", "Напоминания сотрудникам"],
+  "payment-settings": ["Платёжные реквизиты", "Настройки банковского QR и почты для чеков"],
   users: ["Пользователи", "Доступ сотрудников к системе"]
 };
 
@@ -61,6 +64,7 @@ export default function Home() {
   const [registryMode, setRegistryMode] = useState<"active" | "archived" | "all">("active");
   const [sidebar, setSidebar] = useState(false);
   const [toast, setToast] = useState("");
+  const [qrContractId, setQrContractId] = useState<number | null>(null);
 
   function notify(message: string) {
     setToast(message);
@@ -107,7 +111,7 @@ export default function Home() {
 
   if (!role) return <Login onLogin={setRole} />;
 
-  const visibleMenu = menu.filter((item) => item.id !== "users" || role === "Admin");
+  const visibleMenu = menu.filter((item) => !["users", "payment-settings"].includes(item.id) || role === "Admin");
   const customer = selectedCustomer ? data.customers.find((item) => item.id === selectedCustomer) : null;
 
   return (
@@ -133,14 +137,16 @@ export default function Home() {
           <button className="menu-button" onClick={() => setSidebar(true)} aria-label="Открыть меню"><Menu /></button>
           <div><h1>{customer ? customer.fullName : titles[page][0]}</h1><p>{customer ? `${customer.customerType === "business" ? "Компания" : "Физическое лицо"} · ${customer.phone}` : titles[page][1]}</p></div>
           <div className="top-actions">
-            {page !== "dashboard" && !customer && <button className="button primary" onClick={() => setModal({ type: page })}><Plus size={17} />Добавить</button>}
+            {page !== "dashboard" && page !== "payment-settings" && !customer && <button className="button primary" onClick={() => setModal({ type: page })}><Plus size={17} />Добавить</button>}
           </div>
         </header>
 
         {customer ? (
-          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} />
+          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} />
         ) : page === "dashboard" ? (
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
+        ) : page === "payment-settings" ? (
+          <PaymentSettingsPage data={data} onSave={update} />
         ) : (
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
@@ -148,6 +154,7 @@ export default function Home() {
         )}
       </main>
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
+      {qrContractId && <PaymentQrModal contractId={qrContractId} data={data} onClose={() => setQrContractId(null)} onSave={update} onOpenSettings={() => { setQrContractId(null); navigate("payment-settings"); }} />}
       {toast && <div className="toast">{toast}</div>}
       <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>
     </div>
@@ -297,8 +304,9 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   );
 }
 
-function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd }: {
-  data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void; onAdd: (page: EntityType) => void;
+function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr }: {
+  data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void;
+  onAdd: (page: EntityType) => void; onQr: (contractId: number) => void;
 }) {
   const customer = data.customers.find((item) => item.id === customerId)!;
   const contracts = data.contracts.filter((item) => item.customerId === customerId);
@@ -320,7 +328,10 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd }: {
       </div>
       <div className="detail-tabs">{["contracts", "charges", "payments", "documents", "tasks"].map((id) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{({ contracts: "Договоры", charges: "Начисления", payments: "Оплаты", documents: "Документы", tasks: "Задачи" } as Record<string, string>)[id]}</button>)}</div>
       <div className="detail-content">
-        <div className="detail-action"><button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button></div>
+        <div className="detail-action">
+          {active && <button className="button primary" onClick={() => onQr(active.id)}><QrCode size={16} />QR для оплаты</button>}
+          <button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button>
+        </div>
         {tab === "contracts" && <SimpleTable headers={["Договор", "Юнит", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [x.contractNumber, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} />}
         {tab === "charges" && <SimpleTable headers={["Период", "Срок", "Сумма", "Оплачено", "Статус"]} rows={charges.map((x) => [`${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))])} />}
         {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber, money(x.amount)])} />}
@@ -328,6 +339,130 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd }: {
         {tab === "tasks" && <SimpleTable headers={["Задача", "Срок", "Статус"]} rows={tasks.map((x) => [x.title, date(x.dueDate), badge(x.status)])} />}
       </div>
     </section>
+  );
+}
+
+function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: AppData, message: string) => void }) {
+  const settings = data.paymentSettings ?? {
+    bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "", accountNumber: "",
+    bic: "", correspondentAccount: "", receiptEmail: ""
+  };
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const next = structuredClone(data);
+    next.paymentSettings = {
+      bankName: String(form.get("bankName") ?? "").trim(),
+      recipientName: String(form.get("recipientName") ?? "").trim(),
+      taxId: String(form.get("taxId") ?? "").replace(/\s/g, ""),
+      kpp: String(form.get("kpp") ?? "").replace(/\s/g, ""),
+      accountNumber: String(form.get("accountNumber") ?? "").replace(/\s/g, ""),
+      bic: String(form.get("bic") ?? "").replace(/\s/g, ""),
+      correspondentAccount: String(form.get("correspondentAccount") ?? "").replace(/\s/g, ""),
+      receiptEmail: String(form.get("receiptEmail") ?? "").trim()
+    };
+    onSave(next, "Платёжные реквизиты сохранены");
+  }
+  return (
+    <form className="settings-layout" onSubmit={submit}>
+      <section className="panel settings-panel">
+        <div className="panel-head"><h2>Получатель платежа</h2>{hasCompletePaymentSettings(settings) ? badge("active") : <span className="badge badge-pending">Не настроено</span>}</div>
+        <p className="settings-note">Реквизиты используются только для формирования банковского QR. До заполнения всех обязательных полей система создаёт безопасный демо-код.</p>
+        <div className="form-grid">
+          <Field name="bankName" label="Банк" required defaultValue={settings.bankName} />
+          <Field name="recipientName" label="Получатель" required defaultValue={settings.recipientName} />
+          <Field name="taxId" label="ИНН" required defaultValue={settings.taxId} />
+          <Field name="kpp" label="КПП, если есть" defaultValue={settings.kpp} />
+          <Field name="accountNumber" label="Расчётный счёт" required defaultValue={settings.accountNumber} />
+          <Field name="bic" label="БИК" required defaultValue={settings.bic} />
+          <Field name="correspondentAccount" label="Корреспондентский счёт" required wide defaultValue={settings.correspondentAccount} />
+        </div>
+      </section>
+      <section className="panel settings-panel">
+        <div className="panel-head"><h2>Почта для чеков</h2></div>
+        <p className="settings-note">Адрес будет добавляться в инструкцию клиенту. Автоматический приём и распознавание писем включим после подключения почтового backend.</p>
+        <div className="form-grid"><Field name="receiptEmail" label="Email для чеков" type="email" wide defaultValue={settings.receiptEmail} /></div>
+      </section>
+      <div className="settings-actions"><button className="button primary"><Save size={16} />Сохранить реквизиты</button></div>
+    </form>
+  );
+}
+
+function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
+  contractId: number; data: AppData; onClose: () => void;
+  onSave: (data: AppData, message: string) => void; onOpenSettings: () => void;
+}) {
+  const contract = data.contracts.find((item) => item.id === contractId)!;
+  const customer = data.customers.find((item) => item.id === contract.customerId)!;
+  const nextCharge = data.charges.find((item) => item.contractId === contractId && ["pending", "partial", "overdue"].includes(effectiveChargeStatus(item.id, data, new Date("2026-07-19"))));
+  const [period, setPeriod] = useState(nextCharge?.periodStart.slice(0, 7) ?? "2026-08");
+  const [amount, setAmount] = useState(nextCharge?.amount ?? contract.monthlyRate);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const settings = data.paymentSettings ?? {
+    bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "", accountNumber: "",
+    bic: "", correspondentAccount: "", receiptEmail: ""
+  };
+  const purpose = paymentPurpose(contract.contractNumber, period);
+  const isConfigured = hasCompletePaymentSettings(settings);
+  const payload = isConfigured
+    ? buildPaymentQrPayload(settings, amount, purpose)
+    : `DEMO|BankName=Т-Банк|Contract=${contract.contractNumber}|Period=${period}|Sum=${Math.round(amount * 100)}`;
+
+  useEffect(() => {
+    QRCode.toDataURL(payload, { width: 260, margin: 2, errorCorrectionLevel: "M", color: { dark: "#202520", light: "#ffffff" } })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(""));
+  }, [payload]);
+
+  function prepareEmail() {
+    const next = structuredClone(data);
+    const request = {
+      id: nextId(next.paymentRequests ?? []),
+      contractId,
+      period,
+      amount,
+      purpose,
+      recipientEmail: customer.email,
+      status: "prepared" as const,
+      createdAt: new Date().toISOString()
+    };
+    next.paymentRequests = [...(next.paymentRequests ?? []), request];
+    onSave(next, "Письмо с QR подготовлено");
+    const receiptInstruction = settings.receiptEmail
+      ? `После оплаты отправьте чек на ${settings.receiptEmail}. В теле письма укажите:\\nДоговор: ${contract.contractNumber}\\nПериод: ${paymentPeriodLabel(period)}`
+      : `После оплаты сохраните чек. Адрес для автоматической отправки будет настроен позже.`;
+    const body = `Здравствуйте, ${customer.fullName}!\\n\\nСумма к оплате: ${money(amount)}\\n${purpose}.\\n\\n${receiptInstruction}`;
+    window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${encodeURIComponent(`Оплата аренды · ${contract.contractNumber} · ${paymentPeriodLabel(period)}`)}&body=${encodeURIComponent(body)}`;
+  }
+
+  async function copyPurpose() {
+    await navigator.clipboard.writeText(purpose);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section className="modal qr-modal">
+        <div className="modal-head"><div><h2>QR для оплаты аренды</h2><small>{customer.fullName} · {contract.contractNumber}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        {!isConfigured && <div className="qr-warning"><strong>Демо-режим</strong><span>Платёжные реквизиты ещё не заполнены. Этот QR нельзя использовать для реальной оплаты.</span><button className="button" onClick={onOpenSettings}>Заполнить реквизиты</button></div>}
+        <div className="qr-layout">
+          <div className="qr-image">{qrDataUrl ? <img src={qrDataUrl} alt="QR-код для оплаты аренды" /> : <span>Формирование QR…</span>}<small>{isConfigured ? "Банковский QR · ST00012" : "Демонстрационный QR"}</small></div>
+          <div className="qr-fields">
+            <label>Месяц оплаты<input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} /></label>
+            <label>Сумма, ₽<input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(Number(event.target.value))} /></label>
+            <div className="payment-purpose"><span>Назначение платежа</span><strong>{purpose}</strong><button onClick={copyPurpose} title="Копировать назначение"><Copy size={15} />{copied ? "Скопировано" : "Копировать"}</button></div>
+          </div>
+        </div>
+        <div className="qr-summary"><span>Получатель<strong>{settings.recipientName || "Будет указан позже"}</strong></span><span>Банк<strong>{settings.bankName}</strong></span><span>Клиент<strong>{customer.email || "Email не указан"}</strong></span></div>
+        <div className="modal-actions">
+          {qrDataUrl && <a className="button" href={qrDataUrl} download={`qr-${contract.contractNumber}-${period}.png`}><QrCode size={16} />Скачать PNG</a>}
+          <button className="button primary" onClick={prepareEmail} disabled={!customer.email}><Mail size={16} />Подготовить письмо</button>
+        </div>
+        <p className="qr-footnote">Автоматическая отправка без открытия почтовой программы и обработка чеков включатся после подключения почтового backend.</p>
+      </section>
+    </div>
   );
 }
 
