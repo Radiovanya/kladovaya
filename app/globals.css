@@ -99,11 +99,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .search input { width: 100%; border: 0; padding-left: 0; min-height: 34px; outline: 0; }
 .table-card { overflow-x: auto; }
 .table-card th, .table-card td { padding: 12px 14px; }
-.table-card th:last-child, .table-card td:last-child { width: 116px; text-align: right; }
+.table-card th:last-child, .table-card td:last-child { width: 140px; text-align: right; }
 .row-actions { display: inline-flex; justify-content: flex-end; gap: 4px; opacity: .56; transition: opacity .16s ease; }
 tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .row-actions button { width: 28px; height: 28px; border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: 7px; display: grid; place-items: center; cursor: pointer; }
 .row-actions button:hover { background: var(--accent); color: var(--text); border-color: var(--border); }
+.row-actions button:disabled { opacity: .32; cursor: not-allowed; background: transparent; color: var(--muted); border-color: transparent; }
+.row-actions .photo-copy-action:not(:disabled):hover { color: #315f88; background: #e9f1f8; border-color: #c9dceb; }
 .row-actions .danger-action:hover { color: var(--danger); background: #f8eae9; border-color: #f0d5d2; }
 .badge { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 8px; font-size: 9px; background: #eef0f2; color: #5f6670; white-space: nowrap; }
 .badge-active, .badge-paid, .badge-free, .badge-occupied { color: var(--success); background: #e9f2eb; }

@@ -2,7 +2,7 @@
 
 import {
   Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
-  Copy, CreditCard, Download, Eye, EyeOff, FileDown, FileText, LayoutDashboard, LogOut, Mail, MapPin,
+  Copy, CreditCard, Download, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Users, Warehouse, X
 } from "lucide-react";
 import QRCode from "qrcode";
@@ -124,6 +124,16 @@ export default function Home() {
     setData(next);
     notify(`Статус: ${statusText[status]}`);
   }
+  async function copyObjectPhoto(id: number) {
+    const unit = data.units.find((item) => item.id === id);
+    if (!unit?.photoUrl) { notify("У объекта нет ссылки на фото"); return; }
+    try {
+      await navigator.clipboard.writeText(unit.photoUrl);
+      notify("Ссылка на фото скопирована");
+    } catch {
+      notify("Не удалось скопировать ссылку");
+    }
+  }
 
   if (!role) return <Login onLogin={setRole} />;
 
@@ -167,7 +177,7 @@ export default function Home() {
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
             onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)}
-            onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} />
+            onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} onCopyPhoto={copyObjectPhoto} />
         )}
       </main>
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
@@ -261,12 +271,13 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
 }
 
-function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument }: {
+function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onCopyPhoto }: {
   page: Page; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
   onTaskStatus: (id: number, status: TaskStatus) => void;
   onContractDocument: (id: number) => void;
+  onCopyPhoto: (id: number) => void;
 }) {
   const q = search.toLowerCase();
   const cell = (value: unknown) => String(value ?? "").toLowerCase().includes(q);
@@ -332,6 +343,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
           <td><div className="row-actions">
             {page === "contracts" && <button title="Сформировать договор" aria-label="Сформировать договор" onClick={(event) => { event.stopPropagation(); onContractDocument(row.id); }}><FileDown size={15} /></button>}
             <button title="Редактировать" aria-label="Редактировать" onClick={(event) => { event.stopPropagation(); onEdit(row.id); }}><Pencil size={15} /></button>
+            {page === "units" && <button className="photo-copy-action" disabled={!data.units.find((unit) => unit.id === row.id)?.photoUrl} title={data.units.find((unit) => unit.id === row.id)?.photoUrl ? "Копировать ссылку на фото" : "Ссылка на фото не указана"} aria-label="Копировать ссылку на фото" onClick={(event) => { event.stopPropagation(); onCopyPhoto(row.id); }}><ImageIcon size={15} /></button>}
             <button title={archived.has(row.id) ? "Вернуть из архива" : "Скрыть в архив"} aria-label={archived.has(row.id) ? "Вернуть из архива" : "Скрыть в архив"} onClick={(event) => { event.stopPropagation(); onArchive(row.id); }}>{archived.has(row.id) ? <Eye size={15} /> : <EyeOff size={15} />}</button>
             <button className="danger-action" title="Удалить" aria-label="Удалить" onClick={(event) => { event.stopPropagation(); onDelete(row.id); }}><X size={16} /></button>
           </div></td>
