@@ -2,12 +2,13 @@
 
 import {
   Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
-  Copy, CreditCard, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, QrCode, Save, Search, Settings, Users, Warehouse, X
+  Copy, CreditCard, Download, Eye, EyeOff, FileDown, FileText, LayoutDashboard, LogOut, Mail, MapPin,
+  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Users, Warehouse, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, paymentPeriodLabel, paymentPurpose, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
+import { contractFileName, generateRentalContract, nextContractNumber, nextObjectNumber } from "@/lib/contract-document";
 import { useAppStore } from "@/lib/store";
 import type { AppData, Contract, PaymentSettings, Role, TaskStatus } from "@/lib/types";
 
@@ -17,8 +18,8 @@ type Modal = null | { type: EntityType; id?: number };
 
 const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Обзор", icon: LayoutDashboard },
-  { id: "locations", label: "Объекты", icon: MapPin },
-  { id: "units", label: "Юниты", icon: Boxes },
+  { id: "locations", label: "Адреса", icon: MapPin },
+  { id: "units", label: "Объекты", icon: Boxes },
   { id: "customers", label: "Клиенты", icon: Users },
   { id: "contracts", label: "Договоры", icon: FileText },
   { id: "charges", label: "Начисления", icon: CircleDollarSign },
@@ -30,8 +31,8 @@ const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
 
 const titles: Record<Page, [string, string]> = {
   dashboard: ["Обзор", "Операционная картина на сегодня"],
-  locations: ["Объекты", "Адреса и складские площадки"],
-  units: ["Юниты", "Кладовки, гаражи и боксы"],
+  locations: ["Адреса", "Адреса и складские площадки"],
+  units: ["Объекты", "Кладовки, гаражи и боксы"],
   customers: ["Клиенты", "Физические лица и компании"],
   contracts: ["Договоры", "Условия и сроки аренды"],
   charges: ["Начисления", "Обязательства по договорам"],
@@ -47,7 +48,7 @@ const statusText: Record<string, string> = {
   pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
   open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово"
 };
-const date = (value: string) => new Intl.DateTimeFormat("ru-RU").format(new Date(value));
+const date = (value: string) => new Intl.DateTimeFormat("ru-RU").format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const badge = (status: string) => <span className={`badge badge-${status}`}>{statusText[status] ?? status}</span>;
 const nextId = <T extends { id: number }>(rows: T[]) => Math.max(0, ...rows.map((row) => row.id)) + 1;
@@ -65,6 +66,7 @@ export default function Home() {
   const [sidebar, setSidebar] = useState(false);
   const [toast, setToast] = useState("");
   const [qrContractId, setQrContractId] = useState<number | null>(null);
+  const [documentContractId, setDocumentContractId] = useState<number | null>(null);
 
   function notify(message: string) {
     setToast(message);
@@ -78,7 +80,7 @@ export default function Home() {
   }
   function archiveEntity(type: Page, id: number) {
     if (type === "units" && data.contracts.some((contract) => contract.unitId === id && contract.status === "active")) {
-      notify("Нельзя архивировать юнит с активным договором"); return;
+      notify("Нельзя архивировать объект с активным договором"); return;
     }
     const next = structuredClone(data);
     const archived = new Set(next.archivedIds?.[type] ?? []);
@@ -89,7 +91,7 @@ export default function Home() {
   }
   function deleteEntity(type: Page, id: number) {
     const dependency =
-      type === "locations" && data.units.some((item) => item.locationId === id) ? "Сначала удалите связанные юниты" :
+      type === "locations" && data.units.some((item) => item.locationId === id) ? "Сначала удалите связанные объекты" :
       type === "units" && data.contracts.some((item) => item.unitId === id) ? "Сначала удалите связанные договоры" :
       type === "customers" && data.contracts.some((item) => item.customerId === id) ? "Сначала удалите связанные договоры" :
       type === "contracts" && (data.charges.some((item) => item.contractId === id) || data.payments.some((item) => item.contractId === id)) ? "Сначала удалите начисления и оплаты договора" :
@@ -156,7 +158,7 @@ export default function Home() {
         </header>
 
         {customer ? (
-          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} />
+          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} />
         ) : page === "dashboard" ? (
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
@@ -165,11 +167,12 @@ export default function Home() {
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
             onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)}
-            onTaskStatus={updateTaskStatus} />
+            onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} />
         )}
       </main>
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
       {qrContractId && <PaymentQrModal contractId={qrContractId} data={data} onClose={() => setQrContractId(null)} onSave={update} onOpenSettings={() => { setQrContractId(null); navigate("payment-settings"); }} />}
+      {documentContractId && <ContractDocumentModal contractId={documentContractId} data={data} onClose={() => setDocumentContractId(null)} />}
       {toast && <div className="toast">{toast}</div>}
       <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>
     </div>
@@ -210,9 +213,9 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
   const dueTasks = data.tasks.filter((task) => task.status !== "done").slice(0, 4);
   return (
     <>
-      <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все объекты</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
+      <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
       <section className="kpi-grid">
-        <Kpi label="Всего юнитов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} объекта`} />
+        <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
         <Kpi label="Свободно" value={String(metrics.freeUnits)} note={`${metrics.totalUnits ? Math.round(metrics.freeUnits / metrics.totalUnits * 100) : 0}% фонда`} />
         <Kpi label="Занято" value={String(metrics.occupiedUnits)} note={`${metrics.totalUnits ? Math.round(metrics.occupiedUnits / metrics.totalUnits * 100) : 0}% фонда`} />
         <Kpi label="Просрочено" value={money(metrics.overdueAmount)} note={`${metrics.overdueChargesCount} начисления`} tone="danger" />
@@ -258,20 +261,21 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
 }
 
-function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus }: {
+function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument }: {
   page: Page; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
   onTaskStatus: (id: number, status: TaskStatus) => void;
+  onContractDocument: (id: number) => void;
 }) {
   const q = search.toLowerCase();
   const cell = (value: unknown) => String(value ?? "").toLowerCase().includes(q);
   let headers: string[] = [], rows: { id: number; cells: React.ReactNode[]; customerId?: number }[] = [];
   if (page === "locations") {
-    headers = ["Название", "Адрес", "Юниты", "Свободно", "Статус"];
+    headers = ["Название", "Адрес", "Объекты", "Свободно", "Статус"];
     rows = data.locations.filter((x) => cell(x.name) || cell(x.address)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.name}</strong>, x.address, data.units.filter((u) => u.locationId === x.id).length, data.units.filter((u) => u.locationId === x.id && unitStatus(u.id, data) === "free").length, badge(x.isActive ? "active" : "archived")] }));
   } else if (page === "units") {
-    headers = ["Номер", "Объект", "Тип", "Площадь", "Ставка", "Статус"];
+    headers = ["Номер", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
     rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
   } else if (page === "customers") {
     headers = ["Клиент", "Тип", "Телефон", "Email", "Договор", "Задолженность"];
@@ -282,7 +286,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
       return { id: x.id, customerId: x.id, cells: [<strong key="n">{x.fullName}</strong>, x.customerType === "business" ? "Компания" : "Физлицо", x.phone, x.email, contracts.find((c) => c.status === "active")?.contractNumber ?? "—", <strong className={debt ? "danger-text" : ""} key="d">{money(debt)}</strong>] };
     });
   } else if (page === "contracts") {
-    headers = ["Договор", "Клиент", "Юнит", "Период", "Ставка", "Статус"];
+    headers = ["Договор", "Клиент", "Объект", "Период", "Ставка", "Статус"];
     rows = data.contracts.filter((x) => cell(x.contractNumber) || cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [<strong key="n">{x.contractNumber}</strong>, data.customers.find((c) => c.id === x.customerId)?.fullName, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)] }));
   } else if (page === "charges") {
     headers = ["Договор", "Клиент", "Период", "Срок", "Сумма", "Оплачено", "Статус"];
@@ -326,6 +330,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
         {rows.map((row) => <tr key={row.id} onClick={() => row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>
           {row.cells.map((value, index) => <td key={index}>{value}</td>)}
           <td><div className="row-actions">
+            {page === "contracts" && <button title="Сформировать договор" aria-label="Сформировать договор" onClick={(event) => { event.stopPropagation(); onContractDocument(row.id); }}><FileDown size={15} /></button>}
             <button title="Редактировать" aria-label="Редактировать" onClick={(event) => { event.stopPropagation(); onEdit(row.id); }}><Pencil size={15} /></button>
             <button title={archived.has(row.id) ? "Вернуть из архива" : "Скрыть в архив"} aria-label={archived.has(row.id) ? "Вернуть из архива" : "Скрыть в архив"} onClick={(event) => { event.stopPropagation(); onArchive(row.id); }}>{archived.has(row.id) ? <Eye size={15} /> : <EyeOff size={15} />}</button>
             <button className="danger-action" title="Удалить" aria-label="Удалить" onClick={(event) => { event.stopPropagation(); onDelete(row.id); }}><X size={16} /></button>
@@ -336,9 +341,9 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   );
 }
 
-function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr }: {
+function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument }: {
   data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void;
-  onAdd: (page: EntityType) => void; onQr: (contractId: number) => void;
+  onAdd: (page: EntityType) => void; onQr: (contractId: number) => void; onContractDocument: (contractId: number) => void;
 }) {
   const customer = data.customers.find((item) => item.id === customerId)!;
   const contracts = data.contracts.filter((item) => item.customerId === customerId);
@@ -357,7 +362,7 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr }:
       <button className="back-button" onClick={onBack}>← Назад к клиентам</button>
       <div className="summary-grid">
         <div><span>Текущий договор</span><strong>{active?.contractNumber ?? "Нет"}</strong></div>
-        <div><span>Юнит</span><strong>{active ? data.units.find((unit) => unit.id === active.unitId)?.unitNumber : "—"}</strong></div>
+        <div><span>Объект</span><strong>{active ? data.units.find((unit) => unit.id === active.unitId)?.unitNumber : "—"}</strong></div>
         <div><span>Статус аренды</span>{badge(active ? "active" : "expired")}</div>
         <div><span>Задолженность</span><strong className={debt ? "danger-text" : ""}>{money(debt)}</strong></div>
       </div>
@@ -365,9 +370,10 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr }:
       <div className="detail-content">
         <div className="detail-action">
           {active && <button className="button primary" onClick={() => onQr(active.id)}><QrCode size={16} />QR для оплаты</button>}
+          {active && <button className="button" onClick={() => onContractDocument(active.id)}><FileDown size={16} />Сформировать договор</button>}
           <button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button>
         </div>
-        {tab === "contracts" && <SimpleTable headers={["Договор", "Юнит", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [x.contractNumber, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} />}
+        {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [x.contractNumber, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} />}
         {tab === "charges" && <SimpleTable headers={["Период", "Срок", "Сумма", "Оплачено", "Статус"]} rows={charges.map((x) => [`${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))])} />}
         {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber, money(x.amount)])} />}
         {tab === "documents" && <SimpleTable headers={["Файл", "Тип"]} rows={documents.map((x) => [x.fileName, x.documentType])} />}
@@ -530,6 +536,99 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
   );
 }
 
+const escapeHtml = (value: string) => value
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;");
+
+function markdownToHtml(markdown: string) {
+  const inline = (value: string) => escapeHtml(value.trim().replace(/  $/, ""))
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  const output: string[] = [];
+  let inList = false;
+  for (const line of markdown.split("\n")) {
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    const item = line.match(/^-\s+(.+)$/);
+    if (!item && inList) { output.push("</ul>"); inList = false; }
+    if (heading) {
+      const level = heading[1].length;
+      output.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+    } else if (item) {
+      if (!inList) { output.push("<ul>"); inList = true; }
+      output.push(`<li>${inline(item[1])}</li>`);
+    } else if (/^---+$/.test(line.trim())) {
+      output.push("<hr>");
+    } else if (line.trim()) {
+      output.push(`<p>${inline(line)}</p>`);
+    }
+  }
+  if (inList) output.push("</ul>");
+  return output.join("\n");
+}
+
+function ContractDocumentModal({ contractId, data, onClose }: { contractId: number; data: AppData; onClose: () => void }) {
+  const contract = data.contracts.find((item) => item.id === contractId)!;
+  const [content, setContent] = useState("");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const templateUrl = new URL("dogovor_arendy_kladovoi_RF.md", window.location.href);
+    fetch(templateUrl, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Не удалось загрузить шаблон договора");
+        return response.text();
+      })
+      .then((template) => setContent(generateRentalContract(template, data, contractId)))
+      .catch((caught) => {
+        if ((caught as Error).name !== "AbortError") setError(caught instanceof Error ? caught.message : "Не удалось сформировать договор");
+      });
+    return () => controller.abort();
+  }, [contractId, data]);
+
+  function download() {
+    const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = contractFileName(contract.contractNumber);
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function print() {
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) { setError("Браузер заблокировал окно печати"); return; }
+    printWindow.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${escapeHtml(contract.contractNumber)}</title><style>body{font-family:Arial,sans-serif;color:#111;max-width:820px;margin:36px auto;line-height:1.45;font-size:12px}h1{text-align:center;font-size:22px;margin:0 0 24px}h2{font-size:16px;margin:24px 0 10px;page-break-after:avoid}h3{font-size:14px;margin:18px 0 8px}p{margin:6px 0}ul{margin:7px 0 12px;padding-left:24px}hr{border:0;border-top:1px solid #bbb;margin:28px 0}@page{size:A4;margin:18mm}@media print{body{margin:0;max-width:none}}</style></head><body>${markdownToHtml(content)}</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+  }
+
+  async function copy() {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section className="modal contract-modal">
+        <div className="modal-head"><div><h2>Договор {contract.contractNumber}</h2><small>Данные подставлены из карточек клиента, адреса, объекта и договора</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        {error && <div className="form-error">{error}</div>}
+        {!content && !error && <div className="empty">Формируем договор…</div>}
+        {content && <article className="contract-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }} />}
+        <div className="modal-actions contract-actions">
+          <button className="button" onClick={copy} disabled={!content}><Copy size={16} />{copied ? "Скопировано" : "Копировать"}</button>
+          <button className="button" onClick={download} disabled={!content}><Download size={16} />Скачать Markdown</button>
+          <button className="button primary" onClick={print} disabled={!content}><Printer size={16} />Печать / PDF</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SimpleTable({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
   if (!rows.length) return <div className="empty">Записей пока нет</div>;
   return <div className="table-card"><table><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
@@ -547,7 +646,9 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   const [error, setError] = useState("");
   const [customerId, setCustomerId] = useState(Number(editingPayment?.customerId ?? data.customers[0]?.id ?? 0));
   const [contractId, setContractId] = useState(Number(editingPayment?.contractId ?? data.contracts.find((c) => c.status === "active")?.id ?? 0));
+  const [rentalUnitId, setRentalUnitId] = useState(Number(editing?.unitId ?? data.units.find((unit) => unitStatus(unit.id, data) === "free")?.id ?? data.units[0]?.id ?? 0));
   const contract = data.contracts.find((item) => item.id === contractId);
+  const rentalUnit = data.units.find((item) => item.id === rentalUnitId);
   const input = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
   const upsert = <T extends { id: number }>(rows: T[], record: T) => {
     const index = rows.findIndex((item) => item.id === record.id);
@@ -559,7 +660,7 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
     try {
       const next = structuredClone(data);
       if (modal.type === "locations") upsert(next.locations, { id: modal.id ?? nextId(next.locations), name: input(form, "name"), address: input(form, "address"), description: input(form, "description"), isActive: editing?.isActive !== false });
-      else if (modal.type === "units") upsert(next.units, { id: modal.id ?? nextId(next.units), locationId: Number(input(form, "locationId")), unitNumber: input(form, "unitNumber"), unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status: (editing?.status as "free" | undefined) ?? "free", note: input(form, "note") });
+      else if (modal.type === "units") upsert(next.units, { id: modal.id ?? nextId(next.units), locationId: Number(input(form, "locationId")), unitNumber: input(form, "unitNumber") || nextObjectNumber(next), unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status: (editing?.status as "free" | undefined) ?? "free", note: input(form, "note") });
       else if (modal.type === "customers") upsert(next.customers, { id: modal.id ?? nextId(next.customers), customerType: input(form, "customerType") as "individual", fullName: input(form, "fullName"), phone: input(form, "phone"), email: input(form, "email"), passportOrRegistrationData: input(form, "registration"), taxId: input(form, "taxId"), address: input(form, "address"), note: input(form, "note") });
       else if (modal.type === "contracts") {
         const candidate: Contract = { id: modal.id ?? nextId(next.contracts), customerId: Number(input(form, "customerId")), unitId: Number(input(form, "unitId")), contractNumber: input(form, "contractNumber"), startDate: input(form, "startDate"), endDate: input(form, "endDate"), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), billingDay: Number(input(form, "billingDay")), status: input(form, "status") as "active", terminationReason: value("terminationReason"), note: input(form, "note") };
@@ -599,9 +700,9 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
         <div className="modal-head"><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
         <div className="form-grid">
           {modal.type === "locations" && <><Field name="name" label="Название" required defaultValue={value("name")} /><Field name="address" label="Адрес" required defaultValue={value("address")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
-          {modal.type === "units" && <><Select name="locationId" label="Объект" options={data.locations.map((x) => [x.id, x.name])} defaultValue={value("locationId")} /><Field name="unitNumber" label="Номер" required defaultValue={value("unitNumber")} /><Select name="unitType" label="Тип" options={[["storage", "Кладовка"], ["garage", "Гараж"], ["box", "Бокс"]]} defaultValue={value("unitType")} /><Field name="areaSqm" label="Площадь, м²" type="number" required defaultValue={value("areaSqm")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
+          {modal.type === "units" && <><Select name="locationId" label="Адрес" options={data.locations.map((x) => [x.id, x.name])} defaultValue={value("locationId")} /><Field name="unitNumber" label="Номер" required readOnly defaultValue={value("unitNumber", nextObjectNumber(data))} /><Select name="unitType" label="Тип" options={[["storage", "Кладовка"], ["garage", "Гараж"], ["box", "Бокс"]]} defaultValue={value("unitType")} /><Field name="areaSqm" label="Площадь, м²" type="number" required defaultValue={value("areaSqm")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "customers" && <><Select name="customerType" label="Тип" options={[["individual", "Физлицо"], ["business", "Компания"]]} defaultValue={value("customerType")} /><Field name="fullName" label="Имя / название" required defaultValue={value("fullName")} /><Field name="phone" label="Телефон" required defaultValue={value("phone")} /><Field name="email" label="Email" type="email" defaultValue={value("email")} /><Field name="registration" label="Паспорт / регистрационные данные" wide defaultValue={value("passportOrRegistrationData")} /><Field name="taxId" label="ИНН" defaultValue={value("taxId")} /><Field name="address" label="Адрес" defaultValue={value("address")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
-          {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><Select name="unitId" label="Юнит" options={data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => [x.id, x.unitNumber])} defaultValue={value("unitId")} /><Field name="contractNumber" label="Номер" required defaultValue={value("contractNumber", `Д-2026-${String(nextId(data.contracts)).padStart(3, "0")}`)} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="billingDay" label="День начисления" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
+          {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><label>Объект<select name="unitId" value={rentalUnitId} onChange={(event) => setRentalUnitId(Number(event.target.value))}>{data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => <option key={x.id} value={x.id}>{x.unitNumber} · {unitTypeName(x.unitType)} · {money(x.monthlyRate)}</option>)}</select></label><Field name="contractNumber" label="Номер договора" required readOnly defaultValue={value("contractNumber", nextContractNumber(data.contracts))} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field key={`rate-${rentalUnitId}`} name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate", String(rentalUnit?.monthlyRate ?? ""))} /><Field key={`deposit-${rentalUnitId}`} name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount", String(rentalUnit?.depositAmount ?? ""))} /><Field name="billingDay" label="День начисления" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "charges" && <><Select name="contractId" label="Активный договор" options={data.contracts.filter((x) => x.status === "active").map((x) => [x.id, x.contractNumber])} defaultValue={value("contractId")} /><Select name="chargeType" label="Тип" options={[["rent", "Аренда"], ["deposit", "Депозит"], ["penalty", "Пени"], ["other", "Другое"]]} defaultValue={value("chargeType")} /><Field name="periodStart" label="Начало периода" type="date" required defaultValue={value("periodStart", "2026-08-01")} /><Field name="periodEnd" label="Конец периода" type="date" required defaultValue={value("periodEnd", "2026-08-31")} /><Field name="dueDate" label="Срок оплаты" type="date" required defaultValue={value("dueDate", "2026-08-05")} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "payments" && <><label>Клиент<select name="customerId" value={customerId} onChange={(e) => { const id = Number(e.target.value); setCustomerId(id); const c = data.contracts.find((x) => x.customerId === id && x.status === "active"); if (c) setContractId(c.id); }}>{data.customers.map((x) => <option value={x.id} key={x.id}>{x.fullName}</option>)}</select></label><label>Договор<select name="contractId" value={contractId} onChange={(e) => setContractId(Number(e.target.value))}>{data.contracts.filter((x) => x.customerId === customerId).map((x) => <option value={x.id} key={x.id}>{x.contractNumber}</option>)}</select></label><Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} /><Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} /></>}
           {modal.type === "tasks" && <><Field name="title" label="Название" required wide defaultValue={value("title")} /><Field name="dueDate" label="Срок" type="datetime-local" required defaultValue={value("dueDate")} /><Select name="priority" label="Приоритет" options={[["low", "Низкий"], ["medium", "Средний"], ["high", "Высокий"]]} defaultValue={value("priority")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
@@ -615,8 +716,8 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   );
 }
 
-function Field({ name, label, type = "text", required, wide, defaultValue }: { name: string; label: string; type?: string; required?: boolean; wide?: boolean; defaultValue?: string }) {
-  return <label className={wide ? "wide" : ""}>{label}<input name={name} type={type} required={required} defaultValue={defaultValue} /></label>;
+function Field({ name, label, type = "text", required, readOnly, wide, defaultValue }: { name: string; label: string; type?: string; required?: boolean; readOnly?: boolean; wide?: boolean; defaultValue?: string }) {
+  return <label className={wide ? "wide" : ""}>{label}<input name={name} type={type} required={required} readOnly={readOnly} defaultValue={defaultValue} /></label>;
 }
 function Select({ name, label, options, defaultValue }: { name: string; label: string; options: ([string | number, string])[]; defaultValue?: string }) {
   return <label>{label}<select name={name} defaultValue={defaultValue}>{options.map(([value, text]) => <option value={value} key={String(value)}>{text}</option>)}</select></label>;

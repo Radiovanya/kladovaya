@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
+import { generateRentalContract, nextContractNumber, nextObjectNumber } from "../lib/contract-document";
 import { seedData } from "../lib/seed";
 
 test("начисление становится partial при частичной оплате до срока", () => {
@@ -83,4 +85,29 @@ test("повторная синхронизация не дублирует за
 test("день оплаты ограничивается последним днём короткого месяца", () => {
   const contract = { ...seedData.contracts[0], billingDay: 31 };
   assert.equal(paymentTaskDueDate(contract, "2027-02"), "2027-02-28T09:00");
+});
+
+test("номер договора продолжает последовательность текущего года", () => {
+  assert.equal(nextContractNumber(seedData.contracts, new Date("2026-07-21")), "Д-2026-015");
+});
+
+test("номер нового объекта продолжает существующую последовательность", () => {
+  assert.equal(nextObjectNumber(seedData), "О-023");
+});
+
+test("договор заполняется данными клиента, адреса, объекта и периода", () => {
+  const template = readFileSync(new URL("../public/dogovor_arendy_kladovoi_RF.md", import.meta.url), "utf8");
+  const document = generateRentalContract(template, seedData, 1);
+  assert.match(document, /Договор аренды кладовой № Д-2026-014/);
+  assert.match(document, /Алексей Смирнов/);
+  assert.match(document, /\+7 921 555-14-20/);
+  assert.match(document, /a\.smirnov@mail\.ru/);
+  assert.match(document, /Паспорт 4018 123456/);
+  assert.match(document, /Санкт-Петербург, ул\. Северная, 12/);
+  assert.match(document, /A-014/);
+  assert.match(document, /4,2 кв\. м/);
+  assert.match(document, /6 500 рублей в месяц/);
+  assert.match(document, /«01» июня 2026 г\. по «31» мая 2027 г\./);
+  assert.doesNotMatch(document, /\[file:/);
+  assert.doesNotMatch(document, /Редакционные замечания/);
 });
