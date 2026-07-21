@@ -38,6 +38,7 @@ export interface Task {
 export interface DocumentItem {
   id: number; entityType: "customer" | "contract" | "payment"; entityId: number; fileName: string;
   fileUrl: string; documentType: "contract_scan" | "receipt" | "invoice" | "other";
+  mimeType?: string; fileSize?: number; uploadedAt?: string;
 }
 export interface User {
   id: number; name: string; email: string; role: Role; isActive: boolean;

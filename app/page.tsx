@@ -2,13 +2,15 @@
 
 import {
   Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
-  Copy, CreditCard, Download, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Users, Warehouse, X
+  Copy, CreditCard, Download, ExternalLink, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
+  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, Users, Warehouse, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
 import { contractFileName, generateRentalContract, nextContractNumber, nextObjectNumber } from "@/lib/contract-document";
+import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
+import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { useAppStore } from "@/lib/store";
 import type { AppData, Contract, PaymentSettings, Role, TaskStatus } from "@/lib/types";
 
@@ -67,6 +69,8 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [qrContractId, setQrContractId] = useState<number | null>(null);
   const [documentContractId, setDocumentContractId] = useState<number | null>(null);
+  const [scanViewerCustomerId, setScanViewerCustomerId] = useState<number | null>(null);
+  const [scanUploadCustomerId, setScanUploadCustomerId] = useState<number | null>(null);
 
   function notify(message: string) {
     setToast(message);
@@ -168,7 +172,7 @@ export default function Home() {
         </header>
 
         {customer ? (
-          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} />
+          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} />
         ) : page === "dashboard" ? (
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
@@ -183,6 +187,8 @@ export default function Home() {
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
       {qrContractId && <PaymentQrModal contractId={qrContractId} data={data} onClose={() => setQrContractId(null)} onSave={update} onOpenSettings={() => { setQrContractId(null); navigate("payment-settings"); }} />}
       {documentContractId && <ContractDocumentModal contractId={documentContractId} data={data} onClose={() => setDocumentContractId(null)} />}
+      {scanViewerCustomerId && <SignedContractsModal customerId={scanViewerCustomerId} data={data} onClose={() => setScanViewerCustomerId(null)} onSave={update} />}
+      {scanUploadCustomerId && <SignedContractUploadModal customerId={scanUploadCustomerId} data={data} onClose={() => setScanUploadCustomerId(null)} onSave={update} />}
       {toast && <div className="toast">{toast}</div>}
       <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>
     </div>
@@ -353,9 +359,10 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   );
 }
 
-function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument }: {
+function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument, onViewScans, onUploadScan }: {
   data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void;
   onAdd: (page: EntityType) => void; onQr: (contractId: number) => void; onContractDocument: (contractId: number) => void;
+  onViewScans: (customerId: number) => void; onUploadScan: (customerId: number) => void;
 }) {
   const customer = data.customers.find((item) => item.id === customerId)!;
   const contracts = data.contracts.filter((item) => item.customerId === customerId);
@@ -383,6 +390,8 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
         <div className="detail-action">
           {active && <button className="button primary" onClick={() => onQr(active.id)}><QrCode size={16} />QR для оплаты</button>}
           {active && <button className="button" onClick={() => onContractDocument(active.id)}><FileDown size={16} />Сформировать договор</button>}
+          <button className="button" onClick={() => onViewScans(customerId)}><Eye size={16} />Посмотреть договор</button>
+          <button className="button" onClick={() => onUploadScan(customerId)} disabled={!eligibleContractsForScan(data, customerId).length || customerContractScans(data, customerId).length >= MAX_SIGNED_CONTRACTS_PER_CUSTOMER}><Upload size={16} />Загрузить договор</button>
           <button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button>
         </div>
         {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [x.contractNumber, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} />}
@@ -635,6 +644,131 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
           <button className="button" onClick={copy} disabled={!content}><Copy size={16} />{copied ? "Скопировано" : "Копировать"}</button>
           <button className="button" onClick={download} disabled={!content}><Download size={16} />Скачать Markdown</button>
           <button className="button primary" onClick={print} disabled={!content}><Printer size={16} />Печать / PDF</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SignedContractUploadModal({ customerId, data, onClose, onSave }: {
+  customerId: number; data: AppData; onClose: () => void; onSave: (data: AppData, message: string) => void;
+}) {
+  const customer = data.customers.find((item) => item.id === customerId)!;
+  const scans = customerContractScans(data, customerId);
+  const eligibleContracts = eligibleContractsForScan(data, customerId);
+  const [contractId, setContractId] = useState(eligibleContracts[0]?.id ?? 0);
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    try {
+      if (!file) throw new Error("Выберите скан-копию договора");
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      const inferredType = file.type || ({ pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" } as Record<string, string>)[extension ?? ""] || "";
+      if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(inferredType)) throw new Error("Поддерживаются PDF, JPG, PNG и WebP");
+      if (file.size > 10 * 1024 * 1024) throw new Error("Размер файла не должен превышать 10 МБ");
+      validateSignedContractUpload(data, customerId, contractId);
+      setSaving(true);
+      const next = structuredClone(data);
+      const documentId = nextId(next.documents);
+      await storeSignedContractFile(documentId, file, inferredType);
+      next.documents.push({
+        id: documentId,
+        entityType: "contract",
+        entityId: contractId,
+        fileName: file.name,
+        fileUrl: `indexeddb:${documentId}`,
+        documentType: "contract_scan",
+        mimeType: inferredType,
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString()
+      });
+      onSave(next, "Подписанный договор загружен");
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось загрузить договор");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <form className="modal scan-upload-modal" onSubmit={submit}>
+        <div className="modal-head"><div><h2>Загрузить подписанный договор</h2><small>{customer.fullName} · загружено {scans.length} из {MAX_SIGNED_CONTRACTS_PER_CUSTOMER}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        <div className="scan-limit-note">Можно сохранить до трёх договоров клиента. Каждый договор должен относиться к отдельному объекту.</div>
+        <div className="form-grid scan-upload-fields">
+          <label className="wide">Договор и объект<select value={contractId} onChange={(event) => setContractId(Number(event.target.value))} required>{eligibleContracts.map((contract) => { const unit = data.units.find((item) => item.id === contract.unitId); return <option key={contract.id} value={contract.id}>{contract.contractNumber} · объект {unit?.unitNumber}</option>; })}</select></label>
+          <label className="wide file-picker">Скан-копия<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><small>PDF, JPG, PNG или WebP · до 10 МБ</small></label>
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        <div className="modal-actions"><button type="button" className="button" onClick={onClose}>Отмена</button><button className="button primary" disabled={saving || !eligibleContracts.length}><Upload size={16} />{saving ? "Сохраняем…" : "Загрузить договор"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function SignedContractsModal({ customerId, data, onClose, onSave }: {
+  customerId: number; data: AppData; onClose: () => void; onSave: (data: AppData, message: string) => void;
+}) {
+  const customer = data.customers.find((item) => item.id === customerId)!;
+  const scans = useMemo(() => customerContractScans(data, customerId), [data, customerId]);
+  const [selectedId, setSelectedId] = useState(scans[0]?.id ?? 0);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewType, setPreviewType] = useState("");
+  const [error, setError] = useState("");
+  const selected = scans.find((document) => document.id === selectedId);
+
+  useEffect(() => {
+    if (selectedId && !scans.some((document) => document.id === selectedId)) setSelectedId(scans[0]?.id ?? 0);
+  }, [scans, selectedId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    setPreviewUrl(""); setPreviewType(""); setError("");
+    if (!selected) return;
+    if (selected.fileUrl.startsWith("https://")) {
+      setPreviewUrl(selected.fileUrl); setPreviewType(selected.mimeType ?? "application/pdf"); return;
+    }
+    getSignedContractFile(selected.id)
+      .then((stored) => {
+        if (cancelled) return;
+        if (!stored) throw new Error("Файл не найден в локальном хранилище этого браузера");
+        objectUrl = URL.createObjectURL(stored.blob);
+        setPreviewUrl(objectUrl); setPreviewType(stored.mimeType || selected.mimeType || "application/pdf");
+      })
+      .catch((caught) => !cancelled && setError(caught instanceof Error ? caught.message : "Не удалось открыть договор"));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [selected]);
+
+  async function remove(documentId: number) {
+    if (!window.confirm("Удалить скан-копию договора?")) return;
+    const document = data.documents.find((item) => item.id === documentId);
+    if (document?.fileUrl.startsWith("indexeddb:")) await deleteSignedContractFile(documentId);
+    const next = structuredClone(data);
+    next.documents = next.documents.filter((item) => item.id !== documentId);
+    onSave(next, "Скан-копия договора удалена");
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section className="modal scans-modal">
+        <div className="modal-head"><div><h2>Подписанные договоры</h2><small>{customer.fullName} · {scans.length} из {MAX_SIGNED_CONTRACTS_PER_CUSTOMER}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        {!scans.length ? <div className="empty">Подписанные договоры ещё не загружены</div> : <div className="scans-layout">
+          <aside className="scan-list">{scans.map((document) => { const contract = data.contracts.find((item) => item.id === document.entityId); const unit = data.units.find((item) => item.id === contract?.unitId); return <button key={document.id} className={selectedId === document.id ? "active" : ""} onClick={() => setSelectedId(document.id)}><FileText size={17} /><span><strong>{contract?.contractNumber}</strong><small>Объект {unit?.unitNumber} · {document.fileName}</small></span></button>; })}</aside>
+          <div className="scan-preview">
+            {error && <div className="form-error">{error}</div>}
+            {!previewUrl && !error && <div className="empty">Открываем договор…</div>}
+            {previewUrl && previewType.startsWith("image/") && <img src={previewUrl} alt={`Скан договора ${selected?.fileName ?? ""}`} />}
+            {previewUrl && !previewType.startsWith("image/") && <iframe src={previewUrl} title={`Скан договора ${selected?.fileName ?? ""}`} />}
+          </div>
+        </div>}
+        <div className="modal-actions scans-actions">
+          {previewUrl && <a className="button" href={previewUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />Открыть отдельно</a>}
+          {selected && <button className="button danger-button" onClick={() => remove(selected.id)}><Trash2 size={16} />Удалить</button>}
+          <button className="button primary" onClick={onClose}>Закрыть</button>
         </div>
       </section>
     </div>

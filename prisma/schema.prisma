@@ -257,6 +257,8 @@ model Document {
   fileName     String
   fileUrl      String
   documentType DocumentType
+  mimeType     String             @default("")
+  fileSize     Int                @default(0)
   createdAt    DateTime           @default(now())
 
   @@index([entityType, entityId])
