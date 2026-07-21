@@ -42,4 +42,5 @@ export interface User {
 export interface AppData {
   locations: Location[]; units: Unit[]; customers: Customer[]; contracts: Contract[];
   charges: Charge[]; payments: Payment[]; tasks: Task[]; documents: DocumentItem[]; users: User[];
+  archivedIds?: Record<string, number[]>;
 }
