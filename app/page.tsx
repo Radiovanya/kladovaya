@@ -286,8 +286,8 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
     headers = ["Название", "Адрес", "Объекты", "Свободно", "Статус"];
     rows = data.locations.filter((x) => cell(x.name) || cell(x.address)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.name}</strong>, x.address, data.units.filter((u) => u.locationId === x.id).length, data.units.filter((u) => u.locationId === x.id && unitStatus(u.id, data) === "free").length, badge(x.isActive ? "active" : "archived")] }));
   } else if (page === "units") {
-    headers = ["Номер", "Фото", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
-    rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, <ObjectPhoto key="photo" url={x.photoUrl} label={`Фото объекта ${x.unitNumber}`} />, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
+    headers = ["Номер", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
+    rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
   } else if (page === "customers") {
     headers = ["Клиент", "Тип", "Телефон", "Email", "Договор", "Задолженность"];
     rows = data.customers.filter((x) => cell(x.fullName) || cell(x.phone) || cell(x.email)).map((x) => {
@@ -644,11 +644,6 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
 function SimpleTable({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
   if (!rows.length) return <div className="empty">Записей пока нет</div>;
   return <div className="table-card"><table><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
-}
-
-function ObjectPhoto({ url, label }: { url?: string; label: string }) {
-  if (!url?.startsWith("https://")) return <span className="photo-empty">Нет фото</span>;
-  return <a className="object-photo" href={url} target="_blank" rel="noreferrer" title="Открыть фото" onClick={(event) => event.stopPropagation()}><img src={url} alt={label} loading="lazy" /><span>Открыть</span></a>;
 }
 
 function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, null>; data: AppData; onClose: () => void; onSave: (data: AppData, message: string) => void }) {
