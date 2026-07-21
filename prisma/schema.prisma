@@ -84,6 +84,8 @@ enum TaskPriority {
 enum TaskStatus {
   OPEN
   IN_PROGRESS
+  SENT
+  PAID
   DONE
 }
 
@@ -268,6 +270,7 @@ model Task {
   status               TaskStatus   @default(OPEN)
   relatedEntityType    String?
   relatedEntityId      Int?
+  paymentPeriod        String?
   assignedToUserId    Int?
   assignedToUser      User?        @relation(fields: [assignedToUserId], references: [id])
   createdAt            DateTime     @default(now())
@@ -275,4 +278,5 @@ model Task {
 
   @@index([status, dueDate])
   @@index([relatedEntityType, relatedEntityId])
+  @@index([relatedEntityType, relatedEntityId, paymentPeriod])
 }

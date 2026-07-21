@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { syncMonthlyPaymentTasks } from "./business";
 import { seedData } from "./seed";
 import type { AppData } from "./types";
 
@@ -14,15 +15,18 @@ export function useAppStore() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as AppData;
-        setData({
+      const hydrated = stored
+        ? (() => {
+          const parsed = JSON.parse(stored) as AppData;
+          return {
           ...cloneSeed(),
           ...parsed,
           paymentSettings: { ...seedData.paymentSettings!, ...(parsed.paymentSettings ?? {}) },
           paymentRequests: parsed.paymentRequests ?? []
-        });
-      }
+          };
+        })()
+        : cloneSeed();
+      setData(syncMonthlyPaymentTasks(hydrated, new Date()));
     } finally {
       setReady(true);
     }
@@ -36,7 +40,7 @@ export function useAppStore() {
     data,
     setData,
     reset: () => {
-      const next = cloneSeed();
+      const next = syncMonthlyPaymentTasks(cloneSeed(), new Date());
       setData(next);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     }

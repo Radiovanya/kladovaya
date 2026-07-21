@@ -7,9 +7,9 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, paymentPeriodLabel, paymentPurpose, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, paymentPeriodLabel, paymentPurpose, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, PaymentSettings, Role } from "@/lib/types";
+import type { AppData, Contract, PaymentSettings, Role, TaskStatus } from "@/lib/types";
 
 type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
 type EntityType = Page | "documents";
@@ -45,7 +45,7 @@ const statusText: Record<string, string> = {
   free: "Свободен", reserved: "Зарезервирован", occupied: "Занят", maintenance: "Ремонт", archived: "Архив",
   draft: "Черновик", active: "Активен", expired: "Истёк", terminated: "Расторгнут",
   pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
-  open: "Открыта", in_progress: "В работе", done: "Готово"
+  open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово"
 };
 const date = (value: string) => new Intl.DateTimeFormat("ru-RU").format(new Date(value));
 const isoToday = () => new Date().toISOString().slice(0, 10);
@@ -74,7 +74,7 @@ export default function Home() {
     setPage(next); setSelectedCustomer(null); setSearch(""); setRegistryMode("active"); setSidebar(false);
   }
   function update(next: AppData, message: string) {
-    setData(next); setModal(null); notify(message);
+    setData(syncMonthlyPaymentTasks(next, new Date())); setModal(null); notify(message);
   }
   function archiveEntity(type: Page, id: number) {
     if (type === "units" && data.contracts.some((contract) => contract.unitId === id && contract.status === "active")) {
@@ -107,6 +107,20 @@ export default function Home() {
     if (type === "users") next.users = next.users.filter((item) => item.id !== id);
     if (next.archivedIds?.[type]) next.archivedIds[type] = next.archivedIds[type].filter((item) => item !== id);
     setData(next); notify("Запись удалена");
+  }
+  function updateTaskStatus(id: number, status: TaskStatus) {
+    const next = structuredClone(data);
+    const task = next.tasks.find((item) => item.id === id);
+    if (!task) return;
+    task.status = status;
+    if (task.relatedEntityType === "contract_payment" && task.relatedEntityId && task.paymentPeriod && (status === "sent" || status === "paid")) {
+      const request = [...(next.paymentRequests ?? [])].reverse().find((item) =>
+        item.contractId === task.relatedEntityId && item.period === task.paymentPeriod
+      );
+      if (request) request.status = status;
+    }
+    setData(next);
+    notify(`Статус: ${statusText[status]}`);
   }
 
   if (!role) return <Login onLogin={setRole} />;
@@ -150,7 +164,8 @@ export default function Home() {
         ) : (
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
-            onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)} />
+            onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)}
+            onTaskStatus={updateTaskStatus} />
         )}
       </main>
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
@@ -214,7 +229,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
         </div>
         <div className="panel">
           <PanelHead title="Задачи" action="Все задачи" onClick={() => onNavigate("tasks")} />
-          <div className="task-list">{dueTasks.map((task) => <div className="task-item" key={task.id}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{new Date(task.dueDate) < new Date("2026-07-19T12:00") ? "Просрочено" : new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(task.dueDate))}</small></span></div>)}</div>
+          <div className="task-list">{dueTasks.map((task) => <div className="task-item" key={task.id}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</div>)}</div>
         </div>
         <div className="panel span-2">
           <PanelHead title="Договоры заканчиваются" action="Все договоры" onClick={() => onNavigate("contracts")} />
@@ -243,10 +258,11 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
 }
 
-function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete }: {
+function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus }: {
   page: Page; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
+  onTaskStatus: (id: number, status: TaskStatus) => void;
 }) {
   const q = search.toLowerCase();
   const cell = (value: unknown) => String(value ?? "").toLowerCase().includes(q);
@@ -279,7 +295,23 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
     rows = data.payments.filter((x) => cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <strong key="n">{data.customers.find((c) => c.id === x.customerId)?.fullName}</strong>, data.contracts.find((c) => c.id === x.contractId)?.contractNumber, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>] }));
   } else if (page === "tasks") {
     headers = ["Задача", "Срок", "Приоритет", "Статус"];
-    rows = data.tasks.filter((x) => cell(x.title)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.title}</strong>, date(x.dueDate), <span className={`priority ${x.priority}`} key="p">{priorityName(x.priority)}</span>, badge(x.status)] }));
+    rows = data.tasks.filter((x) => cell(x.title)).map((x) => {
+      const isPaymentTask = x.relatedEntityType === "contract_payment";
+      return { id: x.id, cells: [
+        <span className="task-title-cell" key="n"><strong>{x.title}</strong>{x.paymentPeriod && <small>{paymentPeriodLabel(x.paymentPeriod)}</small>}</span>,
+        date(x.dueDate),
+        <span className={`priority ${x.priority}`} key="p">{priorityName(x.priority)}</span>,
+        <select className={`task-status-select status-${x.status}`} key="s" value={x.status}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onTaskStatus(x.id, event.target.value as TaskStatus)}>
+          <option value="open">{isPaymentTask ? "Ожидает отправки" : "Открыта"}</option>
+          <option value="in_progress">В работе</option>
+          {isPaymentTask && <option value="sent">Отправлен</option>}
+          {isPaymentTask && <option value="paid">Оплачен</option>}
+          <option value="done">Готово</option>
+        </select>
+      ] };
+    });
   } else if (page === "users") {
     headers = ["Сотрудник", "Email", "Роль", "Статус"];
     rows = data.users.filter((x) => cell(x.name) || cell(x.email)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.name}</strong>, x.email, x.role, badge(x.isActive ? "active" : "archived")] }));
@@ -315,7 +347,10 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr }:
   const charges = data.charges.filter((item) => contractIds.includes(item.contractId));
   const payments = data.payments.filter((item) => item.customerId === customerId);
   const documents = data.documents.filter((item) => item.entityType === "customer" && item.entityId === customerId || item.entityType === "contract" && contractIds.includes(item.entityId));
-  const tasks = data.tasks.filter((item) => item.relatedEntityType === "customer" && item.relatedEntityId === customerId);
+  const tasks = data.tasks.filter((item) =>
+    item.relatedEntityType === "customer" && item.relatedEntityId === customerId ||
+    item.relatedEntityType === "contract_payment" && item.relatedEntityId !== null && contractIds.includes(item.relatedEntityId)
+  );
   const debt = charges.filter((charge) => effectiveChargeStatus(charge.id, data, new Date("2026-07-19")) === "overdue").reduce((sum, charge) => sum + charge.amount - chargePaidAmount(charge.id, data), 0);
   return (
     <section>
@@ -417,18 +452,47 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
 
   function prepareEmail() {
     const next = structuredClone(data);
-    const request = {
-      id: nextId(next.paymentRequests ?? []),
-      contractId,
-      period,
-      amount,
-      purpose,
-      recipientEmail: customer.email,
-      status: "prepared" as const,
-      createdAt: new Date().toISOString()
-    };
-    next.paymentRequests = [...(next.paymentRequests ?? []), request];
-    onSave(next, "Письмо с QR подготовлено");
+    const existingRequest = [...(next.paymentRequests ?? [])].reverse().find((item) =>
+      item.contractId === contractId && item.period === period
+    );
+    if (existingRequest) {
+      existingRequest.amount = amount;
+      existingRequest.purpose = purpose;
+      existingRequest.recipientEmail = customer.email;
+      existingRequest.status = "sent";
+    } else {
+      next.paymentRequests = [...(next.paymentRequests ?? []), {
+        id: nextId(next.paymentRequests ?? []),
+        contractId,
+        period,
+        amount,
+        purpose,
+        recipientEmail: customer.email,
+        status: "sent" as const,
+        createdAt: new Date().toISOString()
+      }];
+    }
+    const paymentTask = next.tasks.find((task) =>
+      task.relatedEntityType === "contract_payment" &&
+      task.relatedEntityId === contractId &&
+      task.paymentPeriod === period
+    );
+    if (paymentTask) {
+      paymentTask.status = "sent";
+    } else {
+      next.tasks.push({
+        id: nextId(next.tasks),
+        title: `Отправить QR · ${contract.contractNumber}`,
+        description: `Ежемесячная оплата ${money(amount)} · ${customer.email}`,
+        dueDate: paymentTaskDueDate(contract, period),
+        priority: "medium",
+        status: "sent",
+        relatedEntityType: "contract_payment",
+        relatedEntityId: contractId,
+        paymentPeriod: period
+      });
+    }
+    onSave(next, "Письмо открыто, задача отмечена как отправленная");
     const receiptInstruction = settings.receiptEmail
       ? `После оплаты отправьте чек на ${settings.receiptEmail}. В теле письма укажите:\\nДоговор: ${contract.contractNumber}\\nПериод: ${paymentPeriodLabel(period)}`
       : `После оплаты сохраните чек. Адрес для автоматической отправки будет настроен позже.`;
@@ -458,7 +522,7 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
         <div className="qr-summary"><span>Получатель<strong>{settings.recipientName || "Будет указан позже"}</strong></span><span>Банк<strong>{settings.bankName}</strong></span><span>Клиент<strong>{customer.email || "Email не указан"}</strong></span></div>
         <div className="modal-actions">
           {qrDataUrl && <a className="button" href={qrDataUrl} download={`qr-${contract.contractNumber}-${period}.png`}><QrCode size={16} />Скачать PNG</a>}
-          <button className="button primary" onClick={prepareEmail} disabled={!customer.email}><Mail size={16} />Подготовить письмо</button>
+          <button className="button primary" onClick={prepareEmail} disabled={!customer.email}><Mail size={16} />Открыть письмо и отметить отправленным</button>
         </div>
         <p className="qr-footnote">Автоматическая отправка без открытия почтовой программы и обработка чеков включатся после подключения почтового backend.</p>
       </section>
@@ -508,8 +572,21 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
         if (chargeId) {
           const charge = next.charges.find((item) => item.id === Number(chargeId))!;
           charge.status = calculateChargeStatus(charge.amount, chargePaidAmount(charge.id, next), charge.dueDate, new Date("2026-07-19"));
+          if (charge.status === "paid") {
+            const period = charge.periodStart.slice(0, 7);
+            const task = next.tasks.find((item) =>
+              item.relatedEntityType === "contract_payment" &&
+              item.relatedEntityId === charge.contractId &&
+              item.paymentPeriod === period
+            );
+            if (task) task.status = "paid";
+            const request = [...(next.paymentRequests ?? [])].reverse().find((item) =>
+              item.contractId === charge.contractId && item.period === period
+            );
+            if (request) request.status = "paid";
+          }
         }
-      } else if (modal.type === "tasks") upsert(next.tasks, { id: modal.id ?? nextId(next.tasks), title: input(form, "title"), description: input(form, "description"), dueDate: input(form, "dueDate"), priority: input(form, "priority") as "medium", status: (editing?.status as "open" | undefined) ?? "open", relatedEntityType: (editing?.relatedEntityType as string | null | undefined) ?? null, relatedEntityId: (editing?.relatedEntityId as number | null | undefined) ?? null });
+      } else if (modal.type === "tasks") upsert(next.tasks, { id: modal.id ?? nextId(next.tasks), title: input(form, "title"), description: input(form, "description"), dueDate: input(form, "dueDate"), priority: input(form, "priority") as "medium", status: (editing?.status as TaskStatus | undefined) ?? "open", relatedEntityType: (editing?.relatedEntityType as string | null | undefined) ?? null, relatedEntityId: (editing?.relatedEntityId as number | null | undefined) ?? null, paymentPeriod: editing?.paymentPeriod as string | undefined });
       else if (modal.type === "documents") upsert(next.documents, { id: modal.id ?? nextId(next.documents), entityType: (editing?.entityType as "customer" | undefined) ?? "customer", entityId: Number(editing?.entityId ?? customerId), fileName: input(form, "fileName"), fileUrl: value("fileUrl", "#"), documentType: input(form, "documentType") as "other" });
       else if (modal.type === "users") upsert(next.users, { id: modal.id ?? nextId(next.users), name: input(form, "name"), email: input(form, "email"), role: input(form, "role") as Role, isActive: editing?.isActive !== false });
       onSave(next, modal.id ? "Изменения сохранены" : "Запись сохранена");

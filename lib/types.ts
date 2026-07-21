@@ -1,6 +1,7 @@
 export type UnitStatus = "free" | "reserved" | "occupied" | "maintenance" | "archived";
 export type ContractStatus = "draft" | "active" | "expired" | "terminated";
 export type ChargeStatus = "pending" | "paid" | "partial" | "overdue" | "cancelled";
+export type TaskStatus = "open" | "in_progress" | "sent" | "paid" | "done";
 export type Role = "Admin" | "Manager" | "Accountant";
 
 export interface Location {
@@ -30,7 +31,8 @@ export interface Payment {
 }
 export interface Task {
   id: number; title: string; description: string; dueDate: string; priority: "low" | "medium" | "high";
-  status: "open" | "in_progress" | "done"; relatedEntityType: string | null; relatedEntityId: number | null;
+  status: TaskStatus; relatedEntityType: string | null; relatedEntityId: number | null;
+  paymentPeriod?: string;
 }
 export interface DocumentItem {
   id: number; entityType: "customer" | "contract" | "payment"; entityId: number; fileName: string;

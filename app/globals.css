@@ -70,11 +70,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .number { text-align: right; }
 .cell-sub { display: block; color: var(--muted); margin-top: 3px; font-size: 10px; }
 .task-list { display: grid; }
-.task-item { display: grid; grid-template-columns: 8px 1fr; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.task-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .task-item:last-child { border-bottom: 0; }
 .task-item > span:last-child { display: grid; gap: 4px; }
 .task-item strong { font-size: 11px; font-weight: 550; }
 .task-item small { font-size: 10px; color: var(--muted); }
+.task-title-cell { display: grid; gap: 3px; }
+.task-title-cell small { color: var(--muted); font-size: 11px; }
+.task-status-select { min-width: 150px; height: 32px; padding: 0 28px 0 10px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+.task-status-select.status-sent { color: #315f88; background: #e9f1f8; border-color: #c9dceb; }
+.task-status-select.status-paid { color: var(--success); background: #e9f2eb; border-color: #cde2d2; }
 .task-dot { width: 7px; height: 7px; border-radius: 50%; background: #819179; margin-top: 3px; }
 .task-dot.high { background: var(--danger); }
 .task-dot.medium { background: #c58a2e; }
@@ -97,6 +102,7 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .row-actions .danger-action:hover { color: var(--danger); background: #f8eae9; border-color: #f0d5d2; }
 .badge { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 8px; font-size: 9px; background: #eef0f2; color: #5f6670; white-space: nowrap; }
 .badge-active, .badge-paid, .badge-free, .badge-occupied { color: var(--success); background: #e9f2eb; }
+.badge-sent { color: #315f88; background: #e9f1f8; }
 .badge-overdue, .badge-terminated { color: var(--danger); background: #f8eae9; }
 .badge-pending, .badge-partial, .badge-maintenance, .badge-draft { color: var(--warning); background: #f7f0e4; }
 .danger-text { color: var(--danger); }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, paymentPurpose, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
 import { seedData } from "../lib/seed";
 
 test("начисление становится partial при частичной оплате до срока", () => {
@@ -61,4 +61,26 @@ test("платёжный QR не формируется без настоящи�
   };
   assert.equal(hasCompletePaymentSettings(settings), false);
   assert.throws(() => buildPaymentQrPayload(settings, 6500, "Аренда"), /Заполните платёжные реквизиты/);
+});
+
+test("для активных договоров создаются ежемесячные задачи по дню оплаты", () => {
+  const data = syncMonthlyPaymentTasks(seedData, new Date("2026-07-21T12:00:00"));
+  const paymentTasks = data.tasks.filter((task) =>
+    task.relatedEntityType === "contract_payment" && task.paymentPeriod === "2026-07"
+  );
+  assert.equal(paymentTasks.length, seedData.contracts.filter((contract) => contract.status === "active").length);
+  const first = paymentTasks.find((task) => task.relatedEntityId === seedData.contracts[0].id);
+  assert.equal(first?.dueDate, paymentTaskDueDate(seedData.contracts[0], "2026-07"));
+  assert.equal(first?.status, "paid");
+});
+
+test("повторная синхронизация не дублирует задачу за тот же месяц", () => {
+  const once = syncMonthlyPaymentTasks(seedData, new Date("2026-07-21T12:00:00"));
+  const twice = syncMonthlyPaymentTasks(once, new Date("2026-07-22T12:00:00"));
+  assert.equal(twice.tasks.length, once.tasks.length);
+});
+
+test("день оплаты ограничивается последним днём короткого месяца", () => {
+  const contract = { ...seedData.contracts[0], billingDay: 31 };
+  assert.equal(paymentTaskDueDate(contract, "2027-02"), "2027-02-28T09:00");
 });

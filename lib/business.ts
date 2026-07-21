@@ -1,4 +1,4 @@
-import type { AppData, ChargeStatus, Contract, PaymentSettings, UnitStatus } from "./types";
+import type { AppData, ChargeStatus, Contract, PaymentSettings, TaskStatus, UnitStatus } from "./types";
 
 export const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
@@ -104,4 +104,75 @@ export function buildPaymentQrPayload(settings: PaymentSettings, amount: number,
     `Purpose=${cleanQrValue(purpose)}`
   ].filter(Boolean);
   return fields.join("|");
+}
+
+const pad = (value: number) => String(value).padStart(2, "0");
+
+export function currentPaymentPeriod(now = new Date()) {
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+}
+
+export function paymentTaskDueDate(contract: Contract, period: string) {
+  const [year, month] = period.split("-").map(Number);
+  if (!year || !month) throw new Error("Некорректный месяц оплаты");
+  const lastDay = new Date(year, month, 0).getDate();
+  const billingDay = Math.min(Math.max(Math.trunc(contract.billingDay || 1), 1), lastDay);
+  return `${period}-${pad(billingDay)}T09:00`;
+}
+
+function paymentTaskStatus(data: AppData, contractId: number, period: string, now: Date): TaskStatus {
+  const request = [...(data.paymentRequests ?? [])]
+    .reverse()
+    .find((item) => item.contractId === contractId && item.period === period);
+  if (request?.status === "paid") return "paid";
+  if (request?.status === "sent") return "sent";
+  const charge = data.charges.find((item) =>
+    item.contractId === contractId && item.periodStart.slice(0, 7) === period
+  );
+  if (charge && effectiveChargeStatus(charge.id, data, now) === "paid") return "paid";
+  return "open";
+}
+
+export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppData {
+  const next = structuredClone(data);
+  const period = currentPaymentPeriod(now);
+  const [year, month] = period.split("-").map(Number);
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0, 23, 59, 59);
+
+  for (const contract of next.contracts) {
+    if (
+      contract.status !== "active" ||
+      new Date(`${contract.startDate}T00:00:00`) > monthEnd ||
+      new Date(`${contract.endDate}T23:59:59`) < monthStart
+    ) continue;
+
+    const customer = next.customers.find((item) => item.id === contract.customerId);
+    const dueDate = paymentTaskDueDate(contract, period);
+    const existing = next.tasks.find((task) =>
+      task.relatedEntityType === "contract_payment" &&
+      task.relatedEntityId === contract.id &&
+      task.paymentPeriod === period
+    );
+    if (existing) {
+      existing.dueDate = dueDate;
+      existing.title = `Отправить QR · ${contract.contractNumber}`;
+      existing.priority = new Date(dueDate) <= now ? "high" : "medium";
+      const detectedStatus = paymentTaskStatus(next, contract.id, period, now);
+      if (detectedStatus !== "open") existing.status = detectedStatus;
+      continue;
+    }
+    next.tasks.push({
+      id: Math.max(0, ...next.tasks.map((task) => task.id)) + 1,
+      title: `Отправить QR · ${contract.contractNumber}`,
+      description: `Ежемесячная оплата ${money(contract.monthlyRate)}${customer?.email ? ` · ${customer.email}` : " · email не указан"}`,
+      dueDate,
+      priority: new Date(dueDate) <= now ? "high" : "medium",
+      status: paymentTaskStatus(next, contract.id, period, now),
+      relatedEntityType: "contract_payment",
+      relatedEntityId: contract.id,
+      paymentPeriod: period
+    });
+  }
+  return next;
 }
