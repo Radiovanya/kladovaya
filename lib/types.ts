@@ -10,6 +10,7 @@ export interface Location {
 export interface Unit {
   id: number; locationId: number; unitNumber: string; unitType: "storage" | "garage" | "box";
   areaSqm: number; monthlyRate: number; depositAmount: number; status: UnitStatus; note: string;
+  photoUrl?: string;
 }
 export interface Customer {
   id: number; customerType: "individual" | "business"; fullName: string; phone: string;

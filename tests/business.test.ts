@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber, nextObjectNumber } from "../lib/contract-document";
 import { seedData } from "../lib/seed";
 
@@ -110,4 +110,11 @@ test("договор заполняется данными клиента, ад�
   assert.match(document, /«01» июня 2026 г\. по «31» мая 2027 г\./);
   assert.doesNotMatch(document, /\[file:/);
   assert.doesNotMatch(document, /Редакционные замечания/);
+});
+
+test("ссылка на фото объекта принимает публичный HTTPS URL", () => {
+  assert.equal(normalizeObjectPhotoUrl(" https://storage.yandexcloud.net/kladovaya/A-014.jpg "), "https://storage.yandexcloud.net/kladovaya/A-014.jpg");
+  assert.equal(normalizeObjectPhotoUrl(""), "");
+  assert.throws(() => normalizeObjectPhotoUrl("http://example.test/photo.jpg"), /https:\/\//);
+  assert.throws(() => normalizeObjectPhotoUrl("не ссылка"), /корректную ссылку/);
 });

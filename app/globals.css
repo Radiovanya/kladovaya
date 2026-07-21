@@ -70,6 +70,10 @@ tbody tr:hover { background: #f7f8f6; }
 tbody tr:last-child td { border-bottom: 0; }
 .number { text-align: right; }
 .cell-sub { display: block; color: var(--muted); margin-top: 3px; font-size: 10px; }
+.object-photo { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
+.object-photo img { width: 52px; height: 38px; border-radius: 7px; border: 1px solid var(--border); object-fit: cover; background: var(--surface-soft); }
+.object-photo span { color: var(--muted); font-size: 9px; }
+.photo-empty { color: var(--muted); font-size: 9px; }
 .task-list { display: grid; }
 .task-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .task-item:last-child { border-bottom: 0; }

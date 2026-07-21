@@ -106,6 +106,16 @@ export function buildPaymentQrPayload(settings: PaymentSettings, amount: number,
   return fields.join("|");
 }
 
+export function normalizeObjectPhotoUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  let url: URL;
+  try { url = new URL(trimmed); }
+  catch { throw new Error("Укажите корректную ссылку на фото"); }
+  if (url.protocol !== "https:") throw new Error("Ссылка на фото должна начинаться с https://");
+  return url.toString();
+}
+
 const pad = (value: number) => String(value).padStart(2, "0");
 
 export function currentPaymentPeriod(now = new Date()) {
