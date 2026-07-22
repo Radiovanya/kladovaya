@@ -26,11 +26,10 @@ export function effectiveChargeStatus(chargeId: number, data: Pick<AppData, "cha
   return calculateChargeStatus(charge.amount, chargePaidAmount(charge.id, data), charge.dueDate, now);
 }
 
-export function unitStatus(unitId: number, data: Pick<AppData, "units" | "contracts">): UnitStatus {
+export function unitStatus(unitId: number, data: Pick<AppData, "units">): UnitStatus {
   const unit = data.units.find((item) => item.id === unitId);
-  if (!unit) throw new Error("Юнит не найден");
-  if (data.contracts.some((contract) => contract.unitId === unitId && contract.status === "active")) return "occupied";
-  return unit.status === "occupied" ? "free" : unit.status;
+  if (!unit) throw new Error("Объект не найден");
+  return unit.status;
 }
 
 export function validateActiveContract(candidate: Contract, contracts: Contract[]) {

@@ -18,14 +18,6 @@ export function nextContractNumber(contracts: Contract[], now = new Date()) {
   return `Д-${year}-${String(maximum + 1).padStart(3, "0")}`;
 }
 
-export function nextObjectNumber(data: Pick<AppData, "units">) {
-  const maximum = data.units.reduce((max, unit) => {
-    const match = unit.unitNumber.match(/(\d+)$/);
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 0);
-  return `О-${String(maximum + 1).padStart(3, "0")}`;
-}
-
 function replaceFirst(source: string, search: string | RegExp, replacement: string) {
   return source.replace(search, replacement);
 }

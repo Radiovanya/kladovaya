@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
-import { generateRentalContract, nextContractNumber, nextObjectNumber } from "../lib/contract-document";
+import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
 import { seedData } from "../lib/seed";
 
@@ -18,12 +18,18 @@ test("неполностью оплаченное начисление посл�
   assert.equal(calculateChargeStatus(10000, 4000, "2026-07-05", new Date("2026-07-19")), "overdue");
 });
 
-test("активный договор делает юнит занятым", () => {
+test("ручной статус занятого объекта сохраняется", () => {
   assert.equal(unitStatus(1, seedData), "occupied");
 });
 
-test("истёкший договор не делает юнит занятым", () => {
+test("ручной статус ремонта сохраняется", () => {
   assert.equal(unitStatus(4, seedData), "maintenance");
+});
+
+test("ручной статус свободного объекта не подменяется активным договором", () => {
+  const data = structuredClone(seedData);
+  data.units.find((unit) => unit.id === 1)!.status = "free";
+  assert.equal(unitStatus(1, data), "free");
 });
 
 test("пересекающийся активный договор запрещён", () => {
@@ -90,10 +96,6 @@ test("день оплаты ограничивается последним дн
 
 test("номер договора продолжает последовательность текущего года", () => {
   assert.equal(nextContractNumber(seedData.contracts, new Date("2026-07-21")), "Д-2026-015");
-});
-
-test("номер нового объекта продолжает существующую последовательность", () => {
-  assert.equal(nextObjectNumber(seedData), "О-023");
 });
 
 test("договор заполняется данными клиента, адреса, объекта и периода", () => {

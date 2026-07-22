@@ -8,11 +8,11 @@ import {
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
-import { contractFileName, generateRentalContract, nextContractNumber, nextObjectNumber } from "@/lib/contract-document";
+import { contractFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, PaymentSettings, Role, TaskStatus } from "@/lib/types";
+import type { AppData, Contract, PaymentSettings, Role, TaskStatus, UnitStatus } from "@/lib/types";
 
 type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
 type EntityType = Page | "documents";
@@ -35,7 +35,7 @@ const titles: Record<Page, [string, string]> = {
   dashboard: ["Обзор", "Операционная картина на сегодня"],
   locations: ["Адреса", "Адреса и складские площадки"],
   units: ["Объекты", "Кладовки, гаражи и боксы"],
-  customers: ["Клиенты", "Физические лица и компании"],
+  customers: ["Клиенты", "Контактные данные арендаторов"],
   contracts: ["Договоры", "Условия и сроки аренды"],
   charges: ["Начисления", "Обязательства по договорам"],
   payments: ["Оплаты", "Зарегистрированные поступления"],
@@ -45,7 +45,7 @@ const titles: Record<Page, [string, string]> = {
 };
 
 const statusText: Record<string, string> = {
-  free: "Свободен", reserved: "Зарезервирован", occupied: "Занят", maintenance: "Ремонт", archived: "Архив",
+  free: "Свободна", reserved: "Зарезервирована", occupied: "Занята", maintenance: "В ремонте", archived: "Архив",
   draft: "Черновик", active: "Активен", expired: "Истёк", terminated: "Расторгнут",
   pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
   open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово"
@@ -165,7 +165,7 @@ export default function Home() {
       <main>
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebar(true)} aria-label="Открыть меню"><Menu /></button>
-          <div><h1>{customer ? customer.fullName : titles[page][0]}</h1><p>{customer ? `${customer.customerType === "business" ? "Компания" : "Физическое лицо"} · ${customer.phone}` : titles[page][1]}</p></div>
+          <div><h1>{customer ? customer.fullName : titles[page][0]}</h1><p>{customer ? customer.phone : titles[page][1]}</p></div>
           <div className="top-actions">
             {page !== "dashboard" && page !== "payment-settings" && !customer && <button className="button primary" onClick={() => setModal({ type: page })}><Plus size={17} />Добавить</button>}
           </div>
@@ -295,12 +295,12 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
     headers = ["Номер", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
     rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
   } else if (page === "customers") {
-    headers = ["Клиент", "Тип", "Телефон", "Email", "Договор", "Задолженность"];
+    headers = ["ФИО", "Телефон", "Email", "Договор", "Задолженность"];
     rows = data.customers.filter((x) => cell(x.fullName) || cell(x.phone) || cell(x.email)).map((x) => {
       const contracts = data.contracts.filter((c) => c.customerId === x.id);
       const ids = contracts.map((c) => c.id);
       const debt = data.charges.filter((c) => ids.includes(c.contractId) && effectiveChargeStatus(c.id, data, new Date("2026-07-19")) === "overdue").reduce((sum, c) => sum + c.amount - chargePaidAmount(c.id, data), 0);
-      return { id: x.id, customerId: x.id, cells: [<strong key="n">{x.fullName}</strong>, x.customerType === "business" ? "Компания" : "Физлицо", x.phone, x.email, contracts.find((c) => c.status === "active")?.contractNumber ?? "—", <strong className={debt ? "danger-text" : ""} key="d">{money(debt)}</strong>] };
+      return { id: x.id, customerId: x.id, cells: [<strong key="n">{x.fullName}</strong>, x.phone, x.email, contracts.find((c) => c.status === "active")?.contractNumber ?? "—", <strong className={debt ? "danger-text" : ""} key="d">{money(debt)}</strong>] };
     });
   } else if (page === "contracts") {
     headers = ["Договор", "Клиент", "Объект", "Период", "Ставка", "Статус"];
@@ -806,8 +806,14 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
     try {
       const next = structuredClone(data);
       if (modal.type === "locations") upsert(next.locations, { id: modal.id ?? nextId(next.locations), name: input(form, "name"), address: input(form, "address"), description: input(form, "description"), isActive: editing?.isActive !== false });
-      else if (modal.type === "units") upsert(next.units, { id: modal.id ?? nextId(next.units), locationId: Number(input(form, "locationId")), unitNumber: input(form, "unitNumber") || nextObjectNumber(next), unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status: (editing?.status as "free" | undefined) ?? "free", note: input(form, "note"), photoUrl: normalizeObjectPhotoUrl(input(form, "photoUrl")) });
-      else if (modal.type === "customers") upsert(next.customers, { id: modal.id ?? nextId(next.customers), customerType: input(form, "customerType") as "individual", fullName: input(form, "fullName"), phone: input(form, "phone"), email: input(form, "email"), passportOrRegistrationData: input(form, "registration"), taxId: input(form, "taxId"), address: input(form, "address"), note: input(form, "note") });
+      else if (modal.type === "units") {
+        const locationId = Number(input(form, "locationId"));
+        const unitNumber = input(form, "unitNumber");
+        const duplicate = next.units.some((unit) => unit.id !== modal.id && unit.locationId === locationId && unit.unitNumber.toLocaleLowerCase("ru") === unitNumber.toLocaleLowerCase("ru"));
+        if (duplicate) throw new Error("Объект с таким номером уже существует по выбранному адресу");
+        upsert(next.units, { id: modal.id ?? nextId(next.units), locationId, unitNumber, unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status: input(form, "status") as UnitStatus, note: input(form, "note"), photoUrl: normalizeObjectPhotoUrl(input(form, "photoUrl")) });
+      }
+      else if (modal.type === "customers") upsert(next.customers, { id: modal.id ?? nextId(next.customers), customerType: (editing?.customerType as "individual" | "business" | undefined) ?? "individual", fullName: input(form, "fullName"), phone: input(form, "phone"), email: input(form, "email"), passportOrRegistrationData: input(form, "registration"), taxId: input(form, "taxId"), address: input(form, "address"), note: input(form, "note") });
       else if (modal.type === "contracts") {
         const candidate: Contract = { id: modal.id ?? nextId(next.contracts), customerId: Number(input(form, "customerId")), unitId: Number(input(form, "unitId")), contractNumber: input(form, "contractNumber"), startDate: input(form, "startDate"), endDate: input(form, "endDate"), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), billingDay: Number(input(form, "billingDay")), status: input(form, "status") as "active", terminationReason: value("terminationReason"), note: input(form, "note") };
         validateActiveContract(candidate, next.contracts); upsert(next.contracts, candidate);
@@ -846,8 +852,8 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
         <div className="modal-head"><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
         <div className="form-grid">
           {modal.type === "locations" && <><Field name="name" label="Название" required defaultValue={value("name")} /><Field name="address" label="Адрес" required defaultValue={value("address")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
-          {modal.type === "units" && <><Select name="locationId" label="Адрес" options={data.locations.map((x) => [x.id, x.name])} defaultValue={value("locationId")} /><Field name="unitNumber" label="Номер" required readOnly defaultValue={value("unitNumber", nextObjectNumber(data))} /><Select name="unitType" label="Тип" options={[["storage", "Кладовка"], ["garage", "Гараж"], ["box", "Бокс"]]} defaultValue={value("unitType")} /><Field name="areaSqm" label="Площадь, м²" type="number" required defaultValue={value("areaSqm")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="photoUrl" label="Ссылка на фото в Яндекс Облаке" type="url" wide defaultValue={value("photoUrl")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
-          {modal.type === "customers" && <><Select name="customerType" label="Тип" options={[["individual", "Физлицо"], ["business", "Компания"]]} defaultValue={value("customerType")} /><Field name="fullName" label="Имя / название" required defaultValue={value("fullName")} /><Field name="phone" label="Телефон" required defaultValue={value("phone")} /><Field name="email" label="Email" type="email" defaultValue={value("email")} /><Field name="registration" label="Паспорт / регистрационные данные" wide defaultValue={value("passportOrRegistrationData")} /><Field name="taxId" label="ИНН" defaultValue={value("taxId")} /><Field name="address" label="Адрес" defaultValue={value("address")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
+          {modal.type === "units" && <><Select name="locationId" label="Адрес" options={data.locations.map((x) => [x.id, x.name])} defaultValue={value("locationId")} /><Field name="unitNumber" label="Номер" required defaultValue={value("unitNumber")} /><Select name="status" label="Статус" options={[["occupied", "Занята"], ["free", "Свободна"], ["maintenance", "В ремонте"]]} defaultValue={value("status", "free")} /><Select name="unitType" label="Тип" options={[["storage", "Кладовка"], ["garage", "Гараж"], ["box", "Бокс"]]} defaultValue={value("unitType")} /><Field name="areaSqm" label="Площадь, м²" type="number" required defaultValue={value("areaSqm")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="photoUrl" label="Ссылка на фото в Яндекс Облаке" type="url" wide defaultValue={value("photoUrl")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
+          {modal.type === "customers" && <><Field name="fullName" label="ФИО" required defaultValue={value("fullName")} /><Field name="phone" label="Телефон" required defaultValue={value("phone")} /><Field name="email" label="Email" type="email" defaultValue={value("email")} /><Field name="registration" label="Паспорт / регистрационные данные" wide defaultValue={value("passportOrRegistrationData")} /><Field name="taxId" label="ИНН" defaultValue={value("taxId")} /><Field name="address" label="Адрес" defaultValue={value("address")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><label>Объект<select name="unitId" value={rentalUnitId} onChange={(event) => setRentalUnitId(Number(event.target.value))}>{data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => <option key={x.id} value={x.id}>{x.unitNumber} · {unitTypeName(x.unitType)} · {money(x.monthlyRate)}</option>)}</select></label><Field name="contractNumber" label="Номер договора" required readOnly defaultValue={value("contractNumber", nextContractNumber(data.contracts))} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field key={`rate-${rentalUnitId}`} name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate", String(rentalUnit?.monthlyRate ?? ""))} /><Field key={`deposit-${rentalUnitId}`} name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount", String(rentalUnit?.depositAmount ?? ""))} /><Field name="billingDay" label="День начисления" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "charges" && <><Select name="contractId" label="Активный договор" options={data.contracts.filter((x) => x.status === "active").map((x) => [x.id, x.contractNumber])} defaultValue={value("contractId")} /><Select name="chargeType" label="Тип" options={[["rent", "Аренда"], ["deposit", "Депозит"], ["penalty", "Пени"], ["other", "Другое"]]} defaultValue={value("chargeType")} /><Field name="periodStart" label="Начало периода" type="date" required defaultValue={value("periodStart", "2026-08-01")} /><Field name="periodEnd" label="Конец периода" type="date" required defaultValue={value("periodEnd", "2026-08-31")} /><Field name="dueDate" label="Срок оплаты" type="date" required defaultValue={value("dueDate", "2026-08-05")} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "payments" && <><label>Клиент<select name="customerId" value={customerId} onChange={(e) => { const id = Number(e.target.value); setCustomerId(id); const c = data.contracts.find((x) => x.customerId === id && x.status === "active"); if (c) setContractId(c.id); }}>{data.customers.map((x) => <option value={x.id} key={x.id}>{x.fullName}</option>)}</select></label><label>Договор<select name="contractId" value={contractId} onChange={(e) => setContractId(Number(e.target.value))}>{data.contracts.filter((x) => x.customerId === customerId).map((x) => <option value={x.id} key={x.id}>{x.contractNumber}</option>)}</select></label><Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} /><Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} /></>}
