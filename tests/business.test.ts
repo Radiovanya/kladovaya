@@ -4,6 +4,7 @@ import test from "node:test";
 import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
+import { findContractNumber, findPaymentPeriod } from "../lib/receipt-email";
 import { seedData } from "../lib/seed";
 
 test("начисление становится partial при частичной оплате до срока", () => {
@@ -138,4 +139,15 @@ test("для одного клиента разрешено не более тр
   data.contracts = [1, 2, 3, 5].map((unitId, index) => ({ ...seedData.contracts[0], id: 101 + index, unitId, customerId: 1, contractNumber: `Т-${index + 1}` }));
   data.documents = data.contracts.slice(0, 3).map((contract, index) => ({ id: 201 + index, entityType: "contract" as const, entityId: contract.id, fileName: `${index}.pdf`, fileUrl: `indexeddb:${201 + index}`, documentType: "contract_scan" as const }));
   assert.throws(() => validateSignedContractUpload(data, 1, data.contracts[3].id), /максимальное количество/);
+});
+
+test("письмо с чеком сопоставляется по договору и русскому названию месяца", () => {
+  const text = "Договор: Д-2026-014\nПериод: июль 2026";
+  assert.equal(findContractNumber(text, ["Д-2026-014", "Д-2026-011"]), "Д-2026-014");
+  assert.equal(findPaymentPeriod(text), "2026-07");
+});
+
+test("письмо с чеком принимает числовой период", () => {
+  assert.equal(findPaymentPeriod("Месяц: 08.2026"), "2026-08");
+  assert.equal(findPaymentPeriod("Период: 2026-09"), "2026-09");
 });

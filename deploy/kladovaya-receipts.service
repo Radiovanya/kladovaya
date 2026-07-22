@@ -1,0 +1,11 @@
+[Unit]
+Description=Process incoming Kladovaya receipt emails
+After=network-online.target kladovaya.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/kladovaya/.env
+ExecStart=/opt/kladovaya/process-receipts.sh
+User=root
+Group=root

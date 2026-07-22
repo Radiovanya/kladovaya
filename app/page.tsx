@@ -671,9 +671,12 @@ function markdownToHtml(markdown: string) {
 
 function ContractDocumentModal({ contractId, data, onClose }: { contractId: number; data: AppData; onClose: () => void }) {
   const contract = data.contracts.find((item) => item.id === contractId)!;
+  const customer = data.customers.find((item) => item.id === contract.customerId)!;
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -714,6 +717,22 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
     window.setTimeout(() => setCopied(false), 1500);
   }
 
+  async function send() {
+    if (!customer.email) { setError("В карточке клиента не указан email"); return; }
+    setSending(true); setError(""); setSent(false);
+    try {
+      const response = await fetch("/api/mail/contract", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: customer.email, customerName: customer.fullName, contractNumber: contract.contractNumber, content })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Не удалось отправить договор");
+      setSent(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось отправить договор");
+    } finally { setSending(false); }
+  }
+
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
       <section className="modal contract-modal">
@@ -724,6 +743,7 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
         <div className="modal-actions contract-actions">
           <button className="button" onClick={copy} disabled={!content}><Copy size={16} />{copied ? "Скопировано" : "Копировать"}</button>
           <button className="button" onClick={download} disabled={!content}><Download size={16} />Скачать Markdown</button>
+          <button className="button" onClick={send} disabled={!content || !customer.email || sending}><Mail size={16} />{sending ? "Отправляем…" : sent ? "Отправлен" : "Отправить клиенту"}</button>
           <button className="button primary" onClick={print} disabled={!content}><Printer size={16} />Печать / PDF</button>
         </div>
       </section>
