@@ -56,8 +56,10 @@ const badge = (status: string) => <span className={`badge badge-${status}`}>{sta
 const nextId = <T extends { id: number }>(rows: T[]) => Math.max(0, ...rows.map((row) => row.id)) + 1;
 
 export default function Home() {
-  const { data, setData, reset } = useAppStore();
+  const { data, setData, reset, reload, ready, saveError, isDemo } = useAppStore();
   const [role, setRole] = useState<Role | null>(null);
+  const [sessionName, setSessionName] = useState("");
+  const [checkingSession, setCheckingSession] = useState(true);
   const [page, setPage] = useState<Page>("dashboard");
   const [modal, setModal] = useState<Modal>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<number | null>(null);
@@ -71,6 +73,36 @@ export default function Home() {
   const [documentContractId, setDocumentContractId] = useState<number | null>(null);
   const [scanViewerCustomerId, setScanViewerCustomerId] = useState<number | null>(null);
   const [scanUploadCustomerId, setScanUploadCustomerId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreSession() {
+      if (isDemo()) { if (!cancelled) setCheckingSession(false); return; }
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json() as { user: { role: Role; name: string } };
+        await reload();
+        if (!cancelled) { setRole(payload.user.role); setSessionName(payload.user.name); }
+      }
+      if (!cancelled) setCheckingSession(false);
+    }
+    restoreSession().catch(() => !cancelled && setCheckingSession(false));
+    return () => { cancelled = true; };
+    // Session bootstrap is intentionally run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function acceptLogin(user: { role: Role; name: string }) {
+    if (!isDemo()) await reload();
+    setSessionName(user.name);
+    setRole(user.role);
+  }
+
+  async function logout() {
+    if (!isDemo()) await fetch("/api/auth/logout", { method: "POST" });
+    setRole(null);
+    setSessionName("");
+  }
 
   function notify(message: string) {
     setToast(message);
@@ -139,7 +171,8 @@ export default function Home() {
     }
   }
 
-  if (!role) return <Login onLogin={setRole} />;
+  if (checkingSession || (role && !ready)) return <div className="login-page"><section className="login-card"><h1>Кладовая</h1><p>Загружаем систему…</p></section></div>;
+  if (!role) return <Login onLogin={acceptLogin} />;
 
   const visibleMenu = menu.filter((item) => !["users", "payment-settings"].includes(item.id) || role === "Admin");
   const customer = selectedCustomer ? data.customers.find((item) => item.id === selectedCustomer) : null;
@@ -157,8 +190,8 @@ export default function Home() {
         </nav>
         <div className="profile">
           <span className="avatar">{role.slice(0, 1)}</span>
-          <span><strong>{role === "Admin" ? "Анна Крылова" : role === "Manager" ? "Дмитрий Орлов" : "Елена Романова"}</strong><small>{role}</small></span>
-          <button title="Выйти" onClick={() => setRole(null)}><LogOut size={17} /></button>
+          <span><strong>{sessionName || (role === "Admin" ? "Анна Крылова" : role === "Manager" ? "Дмитрий Орлов" : "Елена Романова")}</strong><small>{role}</small></span>
+          <button title="Выйти" onClick={logout}><LogOut size={17} /></button>
         </div>
       </aside>
       {sidebar && <button className="mobile-scrim" onClick={() => setSidebar(false)} aria-label="Закрыть меню" />}
@@ -190,24 +223,47 @@ export default function Home() {
       {scanViewerCustomerId && <SignedContractsModal customerId={scanViewerCustomerId} data={data} onClose={() => setScanViewerCustomerId(null)} onSave={update} />}
       {scanUploadCustomerId && <SignedContractUploadModal customerId={scanUploadCustomerId} data={data} onClose={() => setScanUploadCustomerId(null)} onSave={update} />}
       {toast && <div className="toast">{toast}</div>}
-      <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>
+      {saveError && <div className="toast save-error">{saveError}</div>}
+      {isDemo() && <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>}
     </div>
   );
 }
 
-function Login({ onLogin }: { onLogin: (role: Role) => void }) {
+function Login({ onLogin }: { onLogin: (user: { role: Role; name: string }) => Promise<void> | void }) {
   const [role, setRole] = useState<Role>("Admin");
+  const [demoMode, setDemoMode] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => setDemoMode(window.location.hostname.endsWith("github.io")), []);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setSubmitting(true);
+    const form = new FormData(event.currentTarget);
+    if (demoMode) {
+      await onLogin({ role, name: role === "Admin" ? "Анна Крылова" : role === "Manager" ? "Дмитрий Орлов" : "Елена Романова" });
+      return;
+    }
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: form.get("email"), password: form.get("password") })
+    });
+    const payload = await response.json().catch(() => ({})) as { user?: { role: Role; name: string }; error?: string };
+    if (!response.ok || !payload.user) { setError(payload.error ?? "Не удалось войти"); setSubmitting(false); return; }
+    await onLogin(payload.user);
+  }
   return (
     <div className="login-page">
-      <section className="login-card">
+      <form className="login-card" onSubmit={submit}>
         <span className="login-logo"><Warehouse size={25} /></span>
         <h1>Кладовая</h1><p>Внутренняя система управления арендой</p>
-        <label>Email<input defaultValue="admin@kladovaya.local" type="email" /></label>
-        <label>Пароль<input defaultValue="demo1234" type="password" /></label>
-        <label>Демо-роль<select value={role} onChange={(event) => setRole(event.target.value as Role)}><option>Admin</option><option>Manager</option><option>Accountant</option></select></label>
-        <button className="button primary login-submit" onClick={() => onLogin(role)}>Войти</button>
-        <small>Демо-режим: данные сохраняются в этом браузере</small>
-      </section>
+        <label>Email<input name="email" defaultValue="admin@kladovaya.local" type="email" autoComplete="username" required /></label>
+        <label>Пароль<input name="password" type="password" autoComplete="current-password" required /></label>
+        {demoMode && <label>Демо-роль<select value={role} onChange={(event) => setRole(event.target.value as Role)}><option>Admin</option><option>Manager</option><option>Accountant</option></select></label>}
+        {error && <div className="form-error">{error}</div>}
+        <button className="button primary login-submit" disabled={submitting}>{submitting ? "Входим…" : "Войти"}</button>
+        <small>{demoMode ? "Демо-режим: данные сохраняются в этом браузере" : "Защищённый доступ для сотрудников"}</small>
+      </form>
     </div>
   );
 }
@@ -461,6 +517,8 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
   const [amount, setAmount] = useState(nextCharge?.amount ?? contract.monthlyRate);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [mailError, setMailError] = useState("");
   const settings = data.paymentSettings ?? {
     bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "", accountNumber: "",
     bic: "", correspondentAccount: "", receiptEmail: ""
@@ -477,7 +535,33 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
       .catch(() => setQrDataUrl(""));
   }, [payload]);
 
-  function prepareEmail() {
+  async function prepareEmail() {
+    setMailError("");
+    const receiptInstruction = settings.receiptEmail
+      ? `После оплаты отправьте чек на ${settings.receiptEmail}. В теле письма укажите:\\nДоговор: ${contract.contractNumber}\\nПериод: ${paymentPeriodLabel(period)}`
+      : "После оплаты сохраните чек. Адрес для автоматической отправки будет настроен позже.";
+    const body = `Здравствуйте, ${customer.fullName}!\\n\\nСумма к оплате: ${money(amount)}\\n${purpose}.\\n\\n${receiptInstruction}`;
+    const demoMode = window.location.hostname.endsWith("github.io");
+    if (!demoMode) {
+      setSending(true);
+      const response = await fetch("/api/mail/payment-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: customer.email,
+          customerName: customer.fullName,
+          contractNumber: contract.contractNumber,
+          periodLabel: paymentPeriodLabel(period),
+          amountLabel: money(amount),
+          purpose,
+          receiptEmail: settings.receiptEmail,
+          qrDataUrl
+        })
+      });
+      const responseBody = await response.json().catch(() => ({})) as { error?: string };
+      setSending(false);
+      if (!response.ok) { setMailError(responseBody.error ?? "Не удалось отправить письмо"); return; }
+    }
     const next = structuredClone(data);
     const existingRequest = [...(next.paymentRequests ?? [])].reverse().find((item) =>
       item.contractId === contractId && item.period === period
@@ -519,12 +603,8 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
         paymentPeriod: period
       });
     }
-    onSave(next, "Письмо открыто, задача отмечена как отправленная");
-    const receiptInstruction = settings.receiptEmail
-      ? `После оплаты отправьте чек на ${settings.receiptEmail}. В теле письма укажите:\\nДоговор: ${contract.contractNumber}\\nПериод: ${paymentPeriodLabel(period)}`
-      : `После оплаты сохраните чек. Адрес для автоматической отправки будет настроен позже.`;
-    const body = `Здравствуйте, ${customer.fullName}!\\n\\nСумма к оплате: ${money(amount)}\\n${purpose}.\\n\\n${receiptInstruction}`;
-    window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${encodeURIComponent(`Оплата аренды · ${contract.contractNumber} · ${paymentPeriodLabel(period)}`)}&body=${encodeURIComponent(body)}`;
+    onSave(next, demoMode ? "Письмо открыто, задача отмечена как отправленная" : "QR отправлен клиенту, задача обновлена");
+    if (demoMode) window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${encodeURIComponent(`Оплата аренды · ${contract.contractNumber} · ${paymentPeriodLabel(period)}`)}&body=${encodeURIComponent(body)}`;
   }
 
   async function copyPurpose() {
@@ -549,9 +629,10 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
         <div className="qr-summary"><span>Получатель<strong>{settings.recipientName || "Будет указан позже"}</strong></span><span>Банк<strong>{settings.bankName}</strong></span><span>Клиент<strong>{customer.email || "Email не указан"}</strong></span></div>
         <div className="modal-actions">
           {qrDataUrl && <a className="button" href={qrDataUrl} download={`qr-${contract.contractNumber}-${period}.png`}><QrCode size={16} />Скачать PNG</a>}
-          <button className="button primary" onClick={prepareEmail} disabled={!customer.email}><Mail size={16} />Открыть письмо и отметить отправленным</button>
+          <button className="button primary" onClick={prepareEmail} disabled={!customer.email || sending || !qrDataUrl}><Mail size={16} />{sending ? "Отправляем…" : "Отправить QR клиенту"}</button>
         </div>
-        <p className="qr-footnote">Автоматическая отправка без открытия почтовой программы и обработка чеков включатся после подключения почтового backend.</p>
+        {mailError && <div className="form-error">{mailError}</div>}
+        <p className="qr-footnote">Письмо отправляется через подключённый служебный почтовый ящик.</p>
       </section>
     </div>
   );
@@ -673,13 +754,13 @@ function SignedContractUploadModal({ customerId, data, onClose, onSave }: {
       setSaving(true);
       const next = structuredClone(data);
       const documentId = nextId(next.documents);
-      await storeSignedContractFile(documentId, file, inferredType);
+      const fileUrl = await storeSignedContractFile(documentId, file, inferredType, contractId);
       next.documents.push({
         id: documentId,
         entityType: "contract",
         entityId: contractId,
         fileName: file.name,
-        fileUrl: `indexeddb:${documentId}`,
+        fileUrl,
         documentType: "contract_scan",
         mimeType: inferredType,
         fileSize: file.size,
@@ -729,7 +810,7 @@ function SignedContractsModal({ customerId, data, onClose, onSave }: {
     let objectUrl = "";
     setPreviewUrl(""); setPreviewType(""); setError("");
     if (!selected) return;
-    if (selected.fileUrl.startsWith("https://")) {
+    if (selected.fileUrl.startsWith("https://") || selected.fileUrl.startsWith("/api/documents")) {
       setPreviewUrl(selected.fileUrl); setPreviewType(selected.mimeType ?? "application/pdf"); return;
     }
     getSignedContractFile(selected.id)
@@ -746,7 +827,7 @@ function SignedContractsModal({ customerId, data, onClose, onSave }: {
   async function remove(documentId: number) {
     if (!window.confirm("Удалить скан-копию договора?")) return;
     const document = data.documents.find((item) => item.id === documentId);
-    if (document?.fileUrl.startsWith("indexeddb:")) await deleteSignedContractFile(documentId);
+    if (document) await deleteSignedContractFile(documentId, document.fileUrl);
     const next = structuredClone(data);
     next.documents = next.documents.filter((item) => item.id !== documentId);
     onSave(next, "Скан-копия договора удалена");

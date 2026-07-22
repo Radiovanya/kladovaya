@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup Kladovaya PostgreSQL to S3
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=kladovaya
+Group=kladovaya
+EnvironmentFile=/opt/kladovaya/.env
+ExecStart=/opt/kladovaya/backup-database.sh

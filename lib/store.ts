@@ -7,13 +7,17 @@ import type { AppData } from "./types";
 
 const STORAGE_KEY = "kladovaya-demo-v1";
 const cloneSeed = () => JSON.parse(JSON.stringify(seedData)) as AppData;
+const isStaticDemo = () => typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
 
 export function useAppStore() {
   const [data, setData] = useState<AppData>(cloneSeed);
   const [ready, setReady] = useState(false);
+  const [remote, setRemote] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  useEffect(() => {
-    try {
+  async function load() {
+    setSaveError("");
+    if (isStaticDemo()) {
       const stored = localStorage.getItem(STORAGE_KEY);
       const hydrated = stored
         ? (() => {
@@ -27,18 +31,57 @@ export function useAppStore() {
         })()
         : cloneSeed();
       setData(syncMonthlyPaymentTasks(hydrated, new Date()));
-    } finally {
       setReady(true);
+      setRemote(false);
+      return;
     }
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (response.status === 401) { setReady(true); setRemote(false); return; }
+    const payload = await response.json().catch(() => ({})) as { data?: AppData; error?: string };
+    if (!response.ok || !payload.data) throw new Error(payload.error ?? "Не удалось загрузить данные");
+    setData(syncMonthlyPaymentTasks(payload.data, new Date()));
+    setRemote(true);
+    setReady(true);
+  }
+
+  useEffect(() => {
+    load().catch((error) => { setSaveError(error instanceof Error ? error.message : "Не удалось загрузить данные"); setReady(true); });
   }, []);
 
   useEffect(() => {
-    if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data, ready]);
+    if (!ready) return;
+    if (!remote) {
+      if (isStaticDemo()) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+        signal: controller.signal
+      }).then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(payload.error ?? "Не удалось сохранить изменения");
+        }
+        setSaveError("");
+      }).catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSaveError(error instanceof Error ? error.message : "Не удалось сохранить изменения");
+      });
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [data, ready, remote]);
 
   return {
     data,
     setData,
+    ready,
+    saveError,
+    reload: load,
+    isDemo: isStaticDemo,
     reset: () => {
       const next = syncMonthlyPaymentTasks(cloneSeed(), new Date());
       setData(next);

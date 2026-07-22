@@ -1,0 +1,23 @@
+[Unit]
+Description=Kladovaya rental management
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=kladovaya
+Group=kladovaya
+WorkingDirectory=/opt/kladovaya/app
+EnvironmentFile=/opt/kladovaya/.env
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node /opt/kladovaya/app/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/kladovaya
+
+[Install]
+WantedBy=multi-user.target

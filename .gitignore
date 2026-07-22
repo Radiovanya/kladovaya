@@ -4,7 +4,9 @@ out
 .pnpm-store
 .openai
 .env
-.env.local
+.env.*
+!.env.example
+.deploy
 *.log
 *.tsbuildinfo
 .DS_Store

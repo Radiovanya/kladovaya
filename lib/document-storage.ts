@@ -19,7 +19,20 @@ function openDatabase() {
   });
 }
 
-export async function storeSignedContractFile(id: number, file: File, mimeType = file.type) {
+function isRemoteStorage() {
+  return typeof window !== "undefined" && !window.location.hostname.endsWith("github.io");
+}
+
+export async function storeSignedContractFile(id: number, file: File, mimeType = file.type, contractId?: number) {
+  if (isRemoteStorage()) {
+    const form = new FormData();
+    form.set("file", file);
+    form.set("contractId", String(contractId ?? ""));
+    const response = await fetch("/api/documents", { method: "POST", body: form });
+    const payload = await response.json().catch(() => ({})) as { url?: string; error?: string };
+    if (!response.ok || !payload.url) throw new Error(payload.error ?? "Не удалось загрузить файл");
+    return payload.url;
+  }
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
@@ -28,6 +41,7 @@ export async function storeSignedContractFile(id: number, file: File, mimeType =
     transaction.onerror = () => reject(transaction.error ?? new Error("Не удалось сохранить файл"));
   });
   database.close();
+  return `indexeddb:${id}`;
 }
 
 export async function getSignedContractFile(id: number) {
@@ -41,7 +55,12 @@ export async function getSignedContractFile(id: number) {
   return result;
 }
 
-export async function deleteSignedContractFile(id: number) {
+export async function deleteSignedContractFile(id: number, fileUrl?: string) {
+  if (fileUrl?.startsWith("/api/documents")) {
+    const response = await fetch(fileUrl, { method: "DELETE" });
+    if (!response.ok) throw new Error("Не удалось удалить файл из хранилища");
+    return;
+  }
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");

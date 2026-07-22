@@ -134,6 +134,8 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .form-grid label.wide { grid-column: 1 / -1; }
 .form-grid input, .form-grid select { width: 100%; color: var(--text); }
 .form-error { background: #f8eae9; color: var(--danger); border-radius: 8px; padding: 10px; font-size: 11px; margin-top: 13px; }
+.save-error { background: #8d2d26; }
+.save-error { background: #8d2d26; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .settings-layout { display: grid; grid-template-columns: 1.35fr .9fr; gap: 16px; align-items: start; }
 .settings-panel { min-width: 0; }
