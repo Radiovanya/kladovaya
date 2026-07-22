@@ -67,6 +67,54 @@ export function dashboardMetrics(data: AppData, now = new Date()) {
 
 const cleanQrValue = (value: string) => value.replace(/[|]/g, " ").trim();
 
+const qrDigits = (value: string) => value.replace(/\D/g, "");
+const qrChecksum = (value: string) => {
+  const weights = [7, 1, 3];
+  return [...value].reduce((sum, digit, index) => sum + Number(digit) * weights[index % weights.length], 0) % 10;
+};
+
+function validInn(value: string) {
+  if (/^\d{10}$/.test(value)) {
+    const weights = [2, 4, 10, 3, 5, 9, 4, 6, 8];
+    const check = weights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0) % 11 % 10;
+    return check === Number(value[9]);
+  }
+  if (/^\d{12}$/.test(value)) {
+    const firstWeights = [7, 2, 4, 10, 3, 5, 9, 4, 6, 8];
+    const secondWeights = [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8];
+    const first = firstWeights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0) % 11 % 10;
+    const second = secondWeights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0) % 11 % 10;
+    return first === Number(value[10]) && second === Number(value[11]);
+  }
+  return false;
+}
+
+export function paymentSettingsErrors(settings: PaymentSettings) {
+  const bankName = settings.bankName.trim();
+  const recipientName = settings.recipientName.trim();
+  const taxId = qrDigits(settings.taxId);
+  const kpp = qrDigits(settings.kpp);
+  const account = qrDigits(settings.accountNumber);
+  const bic = qrDigits(settings.bic);
+  const correspondent = qrDigits(settings.correspondentAccount);
+  const errors: string[] = [];
+
+  if (!bankName) errors.push("укажите официальное название банка");
+  if (!recipientName) errors.push("укажите получателя платежа");
+  if (!validInn(taxId)) errors.push("проверьте ИНН получателя");
+  if (settings.kpp.trim() && !/^\d{9}$/.test(kpp)) errors.push("КПП должен содержать 9 цифр");
+  if (!/^\d{9}$/.test(bic)) errors.push("БИК должен содержать 9 цифр");
+  if (!/^\d{20}$/.test(account)) errors.push("расчётный счёт должен содержать 20 цифр");
+  if (!/^\d{20}$/.test(correspondent)) errors.push("корреспондентский счёт должен содержать 20 цифр");
+  if (/^\d{9}$/.test(bic) && /^\d{20}$/.test(account) && qrChecksum(`${bic.slice(-3)}${account}`) !== 0) {
+    errors.push("расчётный счёт не соответствует БИК");
+  }
+  if (/^\d{9}$/.test(bic) && /^\d{20}$/.test(correspondent) && qrChecksum(`0${bic.slice(4, 6)}${correspondent}`) !== 0) {
+    errors.push("корреспондентский счёт не соответствует БИК");
+  }
+  return errors;
+}
+
 export function paymentPeriodLabel(period: string) {
   const [year, month] = period.split("-").map(Number);
   if (!year || !month) throw new Error("Некорректный месяц оплаты");
@@ -78,13 +126,7 @@ export function paymentPurpose(contractNumber: string, period: string) {
 }
 
 export function hasCompletePaymentSettings(settings: PaymentSettings) {
-  return Boolean(
-    settings.recipientName.trim() &&
-    /^(?:\d{10}|\d{12})$/.test(settings.taxId.trim()) &&
-    /^\d{20}$/.test(settings.accountNumber.trim()) &&
-    /^\d{9}$/.test(settings.bic.trim()) &&
-    /^\d{20}$/.test(settings.correspondentAccount.trim())
-  );
+  return paymentSettingsErrors(settings).length === 0;
 }
 
 export function buildPaymentQrPayload(settings: PaymentSettings, amount: number, purpose: string) {
@@ -93,12 +135,12 @@ export function buildPaymentQrPayload(settings: PaymentSettings, amount: number,
   const fields = [
     "ST00012",
     `Name=${cleanQrValue(settings.recipientName)}`,
-    `PersonalAcc=${cleanQrValue(settings.accountNumber)}`,
+    `PersonalAcc=${qrDigits(settings.accountNumber)}`,
     `BankName=${cleanQrValue(settings.bankName)}`,
-    `BIC=${cleanQrValue(settings.bic)}`,
-    `CorrespAcc=${cleanQrValue(settings.correspondentAccount)}`,
-    `PayeeINN=${cleanQrValue(settings.taxId)}`,
-    settings.kpp.trim() ? `KPP=${cleanQrValue(settings.kpp)}` : "",
+    `BIC=${qrDigits(settings.bic)}`,
+    `CorrespAcc=${qrDigits(settings.correspondentAccount)}`,
+    `PayeeINN=${qrDigits(settings.taxId)}`,
+    settings.kpp.trim() ? `KPP=${qrDigits(settings.kpp)}` : "",
     `Sum=${Math.round(amount * 100)}`,
     `Purpose=${cleanQrValue(purpose)}`
   ].filter(Boolean);

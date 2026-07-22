@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
 import { contractFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
@@ -469,27 +469,32 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
     bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "", accountNumber: "",
     bic: "", correspondentAccount: "", receiptEmail: ""
   };
+  const [validationError, setValidationError] = useState("");
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const next = structuredClone(data);
-    next.paymentSettings = {
+    const candidate = {
       bankName: String(form.get("bankName") ?? "").trim(),
       recipientName: String(form.get("recipientName") ?? "").trim(),
-      taxId: String(form.get("taxId") ?? "").replace(/\s/g, ""),
-      kpp: String(form.get("kpp") ?? "").replace(/\s/g, ""),
-      accountNumber: String(form.get("accountNumber") ?? "").replace(/\s/g, ""),
-      bic: String(form.get("bic") ?? "").replace(/\s/g, ""),
-      correspondentAccount: String(form.get("correspondentAccount") ?? "").replace(/\s/g, ""),
+      taxId: String(form.get("taxId") ?? "").replace(/\D/g, ""),
+      kpp: String(form.get("kpp") ?? "").replace(/\D/g, ""),
+      accountNumber: String(form.get("accountNumber") ?? "").replace(/\D/g, ""),
+      bic: String(form.get("bic") ?? "").replace(/\D/g, ""),
+      correspondentAccount: String(form.get("correspondentAccount") ?? "").replace(/\D/g, ""),
       receiptEmail: String(form.get("receiptEmail") ?? "").trim()
     };
+    const errors = paymentSettingsErrors(candidate);
+    if (errors.length) { setValidationError(`Не удалось сохранить: ${errors.join("; ")}.`); return; }
+    setValidationError("");
+    next.paymentSettings = candidate;
     onSave(next, "Платёжные реквизиты сохранены");
   }
   return (
     <form className="settings-layout" onSubmit={submit}>
       <section className="panel settings-panel">
         <div className="panel-head"><h2>Получатель платежа</h2>{hasCompletePaymentSettings(settings) ? badge("active") : <span className="badge badge-pending">Не настроено</span>}</div>
-        <p className="settings-note">Реквизиты используются только для формирования банковского QR. До заполнения всех обязательных полей система создаёт безопасный демо-код.</p>
+        <p className="settings-note">Реквизиты проверяются перед созданием банковского QR. Нерабочий или демонстрационный код отправить клиенту нельзя.</p>
         <div className="form-grid">
           <Field name="bankName" label="Банк" required defaultValue={settings.bankName} />
           <Field name="recipientName" label="Получатель" required defaultValue={settings.recipientName} />
@@ -505,6 +510,7 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
         <p className="settings-note">Адрес будет добавляться в инструкцию клиенту. Автоматический приём и распознавание писем включим после подключения почтового backend.</p>
         <div className="form-grid"><Field name="receiptEmail" label="Email для чеков" type="email" wide defaultValue={settings.receiptEmail} /></div>
       </section>
+      {validationError && <div className="form-error">{validationError}</div>}
       <div className="settings-actions"><button className="button primary"><Save size={16} />Сохранить реквизиты</button></div>
     </form>
   );
@@ -528,19 +534,22 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
     bic: "", correspondentAccount: "", receiptEmail: ""
   };
   const purpose = paymentPurpose(contract.contractNumber, period);
-  const isConfigured = hasCompletePaymentSettings(settings);
+  const settingsErrors = paymentSettingsErrors(settings);
+  const isConfigured = settingsErrors.length === 0;
   const payload = isConfigured
     ? buildPaymentQrPayload(settings, amount, purpose)
-    : `DEMO|BankName=Т-Банк|Contract=${contract.contractNumber}|Period=${period}|Sum=${Math.round(amount * 100)}`;
+    : "";
 
   useEffect(() => {
-    QRCode.toDataURL(payload, { width: 260, margin: 2, errorCorrectionLevel: "M", color: { dark: "#202520", light: "#ffffff" } })
+    if (!payload) { setQrDataUrl(""); return; }
+    QRCode.toDataURL(payload, { width: 720, margin: 4, errorCorrectionLevel: "Q", color: { dark: "#000000", light: "#ffffff" } })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(""));
   }, [payload]);
 
   async function prepareEmail() {
     setMailError("");
+    if (!isConfigured) { setMailError(`QR не отправлен: ${settingsErrors.join("; ")}.`); return; }
     const receiptInstruction = settings.receiptEmail
       ? `После оплаты отправьте чек на ${settings.receiptEmail}. В теле письма укажите:\\nДоговор: ${contract.contractNumber}\\nПериод: ${paymentPeriodLabel(period)}`
       : "После оплаты сохраните чек. Адрес для автоматической отправки будет настроен позже.";
@@ -557,9 +566,18 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
           contractNumber: contract.contractNumber,
           periodLabel: paymentPeriodLabel(period),
           amountLabel: money(amount),
+          amount,
           purpose,
           receiptEmail: settings.receiptEmail,
-          qrDataUrl
+          paymentDetails: {
+            recipientName: settings.recipientName,
+            taxId: settings.taxId,
+            bankName: settings.bankName,
+            bic: settings.bic,
+            accountNumber: settings.accountNumber,
+            correspondentAccount: settings.correspondentAccount,
+            kpp: settings.kpp
+          }
         })
       });
       const responseBody = await response.json().catch(() => ({})) as { error?: string };
@@ -621,9 +639,9 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
     <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
       <section className="modal qr-modal">
         <div className="modal-head"><div><h2>QR для оплаты аренды</h2><small>{customer.fullName} · {contract.contractNumber}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
-        {!isConfigured && <div className="qr-warning"><strong>Демо-режим</strong><span>Платёжные реквизиты ещё не заполнены. Этот QR нельзя использовать для реальной оплаты.</span><button className="button" onClick={onOpenSettings}>Заполнить реквизиты</button></div>}
+        {!isConfigured && <div className="qr-warning"><strong>QR не сформирован</strong><span>{settingsErrors.join("; ")}. Исправьте реквизиты — система не отправляет демонстрационные коды клиентам.</span><button className="button" onClick={onOpenSettings}>Проверить реквизиты</button></div>}
         <div className="qr-layout">
-          <div className="qr-image">{qrDataUrl ? <img src={qrDataUrl} alt="QR-код для оплаты аренды" /> : <span>Формирование QR…</span>}<small>{isConfigured ? "Банковский QR · ST00012" : "Демонстрационный QR"}</small></div>
+          <div className="qr-image">{qrDataUrl ? <img src={qrDataUrl} alt="QR-код для оплаты аренды" /> : <span>{isConfigured ? "Формирование QR…" : "Ожидает корректных реквизитов"}</span>}<small>{isConfigured ? "Банковский QR · ST00012 · проверен" : "Отправка заблокирована"}</small></div>
           <div className="qr-fields">
             <label>Месяц оплаты<input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} /></label>
             <label>Сумма, ₽<input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(Number(event.target.value))} /></label>
@@ -632,8 +650,8 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
         </div>
         <div className="qr-summary"><span>Получатель<strong>{settings.recipientName || "Будет указан позже"}</strong></span><span>Банк<strong>{settings.bankName}</strong></span><span>Клиент<strong>{customer.email || "Email не указан"}</strong></span></div>
         <div className="modal-actions">
-          {qrDataUrl && <a className="button" href={qrDataUrl} download={`qr-${contract.contractNumber}-${period}.png`}><QrCode size={16} />Скачать PNG</a>}
-          <button className="button primary" onClick={prepareEmail} disabled={!customer.email || sending || !qrDataUrl}><Mail size={16} />{sending ? "Отправляем…" : "Отправить QR клиенту"}</button>
+          {qrDataUrl && isConfigured && <a className="button" href={qrDataUrl} download={`qr-${contract.contractNumber}-${period}.png`}><QrCode size={16} />Скачать PNG</a>}
+          <button className="button primary" onClick={prepareEmail} disabled={!customer.email || sending || !qrDataUrl || !isConfigured}><Mail size={16} />{sending ? "Отправляем…" : "Отправить QR клиенту"}</button>
         </div>
         {mailError && <div className="form-error">{mailError}</div>}
         <p className="qr-footnote">Письмо отправляется через подключённый служебный почтовый ящик.</p>
