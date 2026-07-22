@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import QRCode from "qrcode";
 import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
@@ -47,7 +48,7 @@ test("dashboard исключает архивные юниты и считает
 });
 
 test("назначение QR содержит договор и оплачиваемый месяц", () => {
-  assert.equal(paymentPurpose("Д-2026-014", "2026-08"), "Оплата аренды по договору Д-2026-014 за август 2026 г., без НДС");
+  assert.equal(paymentPurpose("Д-2026-014", "2026-08"), "Аренда Д-2026-014 08.2026, без НДС");
 });
 
 test("QR ST00012 содержит сумму в копейках и банковские реквизиты", () => {
@@ -62,6 +63,7 @@ test("QR ST00012 содержит сумму в копейках и банков
   assert.match(payload, /\|Sum=650000\|/);
   assert.match(payload, /\|PersonalAcc=40802810600009495815\|/);
   assert.match(payload, /Д-2026-014/);
+  assert.equal(QRCode.create(payload, { errorCorrectionLevel: "L" }).modules.size, 57);
 });
 
 test("платёжный QR не формируется без настоящих реквизитов", () => {

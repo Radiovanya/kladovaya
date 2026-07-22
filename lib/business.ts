@@ -122,7 +122,8 @@ export function paymentPeriodLabel(period: string) {
 }
 
 export function paymentPurpose(contractNumber: string, period: string) {
-  return `Оплата аренды по договору ${cleanQrValue(contractNumber)} за ${paymentPeriodLabel(period)}, без НДС`;
+  const [year, month] = period.split("-");
+  return `Аренда ${cleanQrValue(contractNumber)} ${month}.${year}, без НДС`;
 }
 
 export function hasCompletePaymentSettings(settings: PaymentSettings) {

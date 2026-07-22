@@ -542,7 +542,7 @@ function PaymentQrModal({ contractId, data, onClose, onSave, onOpenSettings }: {
 
   useEffect(() => {
     if (!payload) { setQrDataUrl(""); return; }
-    QRCode.toDataURL(payload, { width: 720, margin: 4, errorCorrectionLevel: "Q", color: { dark: "#000000", light: "#ffffff" } })
+    QRCode.toDataURL(payload, { width: 650, margin: 4, errorCorrectionLevel: "L", color: { dark: "#000000", light: "#ffffff" } })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(""));
   }, [payload]);

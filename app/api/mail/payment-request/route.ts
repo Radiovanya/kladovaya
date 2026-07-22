@@ -46,7 +46,7 @@ export async function POST(request: Request) {
   let qrBuffer: Buffer;
   try {
     const payload = buildPaymentQrPayload(settings, body.amount, body.purpose);
-    qrBuffer = await QRCode.toBuffer(payload, { width: 720, margin: 4, errorCorrectionLevel: "Q", color: { dark: "#000000", light: "#ffffff" } });
+    qrBuffer = await QRCode.toBuffer(payload, { width: 650, margin: 4, errorCorrectionLevel: "L", color: { dark: "#000000", light: "#ffffff" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Не удалось сформировать банковский QR" }, { status: 400 });
   }
@@ -61,8 +61,11 @@ export async function POST(request: Request) {
     to: body.to,
     subject: `Оплата аренды · ${body.contractNumber} · ${body.periodLabel}`,
     text: `Здравствуйте, ${body.customerName}!\n\nСумма к оплате: ${body.amountLabel}\n${body.purpose}\n\n${detailsText}\n\n${receiptText}`,
-    html: `<p>Здравствуйте, ${escapeHtml(body.customerName)}!</p><p><b>Сумма к оплате: ${escapeHtml(body.amountLabel)}</b></p><p>${escapeHtml(body.purpose)}</p><p><img src="cid:payment-qr" alt="QR-код для оплаты" width="360" height="360"></p>${detailsHtml}<p>${escapeHtml(receiptText)}</p>`,
-    attachments: [{ filename: `qr-${body.contractNumber}.png`, content: qrBuffer, cid: "payment-qr" }]
+    html: `<p>Здравствуйте, ${escapeHtml(body.customerName)}!</p><p><b>Сумма к оплате: ${escapeHtml(body.amountLabel)}</b></p><p>${escapeHtml(body.purpose)}</p><p><img src="cid:payment-qr" alt="QR-код для оплаты" width="325" height="325" style="display:block;width:325px;height:325px;max-width:100%;image-rendering:pixelated"></p><p><b>Если камера не распознаёт код:</b> откройте прикреплённый файл <b>qr-${escapeHtml(body.contractNumber)}-large.png</b> в полном размере либо сохраните его и выберите оплату по QR из галереи банковского приложения.</p>${detailsHtml}<p>${escapeHtml(receiptText)}</p>`,
+    attachments: [
+      { filename: `qr-${body.contractNumber}.png`, content: qrBuffer, cid: "payment-qr" },
+      { filename: `qr-${body.contractNumber}-large.png`, content: qrBuffer, contentDisposition: "attachment" }
+    ]
   });
   return NextResponse.json({ ok: true });
 }
