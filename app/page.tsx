@@ -71,6 +71,7 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [qrContractId, setQrContractId] = useState<number | null>(null);
   const [documentContractId, setDocumentContractId] = useState<number | null>(null);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
   const [scanViewerCustomerId, setScanViewerCustomerId] = useState<number | null>(null);
   const [scanUploadCustomerId, setScanUploadCustomerId] = useState<number | null>(null);
 
@@ -205,7 +206,7 @@ export default function Home() {
         </header>
 
         {customer ? (
-          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} />
+          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} />
         ) : page === "dashboard" ? (
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
@@ -214,12 +215,13 @@ export default function Home() {
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
             onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)}
-            onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} onCopyPhoto={copyObjectPhoto} />
+            onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onCopyPhoto={copyObjectPhoto} />
         )}
       </main>
       {modal && <EntityModal modal={modal} data={data} onClose={() => setModal(null)} onSave={update} />}
       {qrContractId && <PaymentQrModal contractId={qrContractId} data={data} onClose={() => setQrContractId(null)} onSave={update} onOpenSettings={() => { setQrContractId(null); navigate("payment-settings"); }} />}
       {documentContractId && <ContractDocumentModal contractId={documentContractId} data={data} onClose={() => setDocumentContractId(null)} />}
+      {selectedPaymentId && <PaymentDetailsModal paymentId={selectedPaymentId} data={data} onClose={() => setSelectedPaymentId(null)} />}
       {scanViewerCustomerId && <SignedContractsModal customerId={scanViewerCustomerId} data={data} onClose={() => setScanViewerCustomerId(null)} onSave={update} />}
       {scanUploadCustomerId && <SignedContractUploadModal customerId={scanUploadCustomerId} data={data} onClose={() => setScanUploadCustomerId(null)} onSave={update} />}
       {toast && <div className="toast">{toast}</div>}
@@ -333,12 +335,13 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
 }
 
-function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onCopyPhoto }: {
+function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onPayment, onCopyPhoto }: {
   page: Page; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
   onTaskStatus: (id: number, status: TaskStatus) => void;
   onContractDocument: (id: number) => void;
+  onPayment: (id: number) => void;
   onCopyPhoto: (id: number) => void;
 }) {
   const q = search.toLowerCase();
@@ -400,7 +403,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
     <section>
       <div className="registry-toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск…" /></label><select value={mode} onChange={(event) => setMode(event.target.value as "active" | "archived" | "all")}><option value="all">Все записи</option><option value="active">Активные</option><option value="archived">Архивные</option></select></div>
       <div className="table-card"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>
-        {rows.map((row) => <tr key={row.id} onClick={() => row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>
+        {rows.map((row) => <tr key={row.id} onClick={() => page === "payments" ? onPayment(row.id) : row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>
           {row.cells.map((value, index) => <td key={index}>{value}</td>)}
           <td><div className="row-actions">
             {page === "contracts" && <button title="Сформировать договор" aria-label="Сформировать договор" onClick={(event) => { event.stopPropagation(); onContractDocument(row.id); }}><FileDown size={15} /></button>}
@@ -415,9 +418,10 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   );
 }
 
-function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument, onViewScans, onUploadScan }: {
+function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument, onPayment, onViewScans, onUploadScan }: {
   data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void;
   onAdd: (page: EntityType) => void; onQr: (contractId: number) => void; onContractDocument: (contractId: number) => void;
+  onPayment: (paymentId: number) => void;
   onViewScans: (customerId: number) => void; onUploadScan: (customerId: number) => void;
 }) {
   const customer = data.customers.find((item) => item.id === customerId)!;
@@ -450,9 +454,9 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
           <button className="button" onClick={() => onUploadScan(customerId)} disabled={!eligibleContractsForScan(data, customerId).length || customerContractScans(data, customerId).length >= MAX_SIGNED_CONTRACTS_PER_CUSTOMER}><Upload size={16} />Загрузить договор</button>
           <button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button>
         </div>
-        {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [x.contractNumber, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} />}
+        {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [<strong key="contract">{x.contractNumber}</strong>, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} onRowClick={(index) => onContractDocument(contracts[index].id)} />}
         {tab === "charges" && <SimpleTable headers={["Период", "Срок", "Сумма", "Оплачено", "Статус"]} rows={charges.map((x) => [`${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))])} />}
-        {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber, money(x.amount)])} />}
+        {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="amount">{money(x.amount)}</strong>])} onRowClick={(index) => onPayment(payments[index].id)} />}
         {tab === "documents" && <SimpleTable headers={["Файл", "Тип"]} rows={documents.map((x) => [x.fileName, x.documentType])} />}
         {tab === "tasks" && <SimpleTable headers={["Задача", "Срок", "Статус"]} rows={tasks.map((x) => [x.title, date(x.dueDate), badge(x.status)])} />}
       </div>
@@ -680,8 +684,7 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
 
   useEffect(() => {
     const controller = new AbortController();
-    const templateUrl = new URL("dogovor_arendy_kladovoi_RF.md", window.location.href);
-    fetch(templateUrl, { signal: controller.signal })
+    fetch("/dogovor_arendy_kladovoi_RF.md", { signal: controller.signal, cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("Не удалось загрузить шаблон договора");
         return response.text();
@@ -876,9 +879,63 @@ function SignedContractsModal({ customerId, data, onClose, onSave }: {
   );
 }
 
-function SimpleTable({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
+function PaymentDetailsModal({ paymentId, data, onClose }: { paymentId: number; data: AppData; onClose: () => void }) {
+  const payment = data.payments.find((item) => item.id === paymentId);
+  if (!payment) return null;
+  const customer = data.customers.find((item) => item.id === payment.customerId);
+  const contract = data.contracts.find((item) => item.id === payment.contractId);
+  const unit = data.units.find((item) => item.id === contract?.unitId);
+  const location = data.locations.find((item) => item.id === unit?.locationId);
+  const charge = payment.chargeId ? data.charges.find((item) => item.id === payment.chargeId) : undefined;
+  const receipts = data.documents.filter((item) => item.entityType === "payment" && item.entityId === payment.id && item.documentType === "receipt");
+  const paidForCharge = charge ? chargePaidAmount(charge.id, data) : 0;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section className="modal payment-details-modal">
+        <div className="modal-head"><div><h2>Оплата {money(payment.amount)}</h2><small>{date(payment.paymentDate)} · {customer?.fullName ?? "Клиент не найден"}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        <div className="payment-detail-grid">
+          <div><span>Договор</span><strong>{contract?.contractNumber ?? "Не указан"}</strong></div>
+          <div><span>Объект</span><strong>{unit ? `${unit.unitNumber}${location ? ` · ${location.address}` : ""}` : "Не указан"}</strong></div>
+          <div><span>Способ оплаты</span><strong>{methodName(payment.paymentMethod)}</strong></div>
+          <div><span>Номер операции</span><strong>{payment.referenceNumber || "Не указан"}</strong></div>
+        </div>
+
+        <section className="payment-source">
+          <h3>Источник начисления</h3>
+          {charge ? <div className="payment-source-grid">
+            <span><small>Период</small><strong>{date(charge.periodStart)} — {date(charge.periodEnd)}</strong></span>
+            <span><small>Срок оплаты</small><strong>{date(charge.dueDate)}</strong></span>
+            <span><small>Тип</small><strong>{chargeTypeName(charge.chargeType)}</strong></span>
+            <span><small>Начислено</small><strong>{money(charge.amount)}</strong></span>
+            <span><small>Оплачено по начислению</small><strong>{money(paidForCharge)}</strong></span>
+            <span><small>Статус</small>{badge(effectiveChargeStatus(charge.id, data))}</span>
+          </div> : <div className="empty compact-empty">Оплата внесена без привязки к начислению</div>}
+        </section>
+
+        {payment.comment && <div className="payment-comment"><span>Комментарий</span><p>{payment.comment}</p></div>}
+
+        <section className="receipt-history">
+          <div className="receipt-history-head"><div><h3>Чеки и подтверждения</h3><small>Файлы сохраняются в истории оплаты и закрытом хранилище</small></div><span className="badge">{receipts.length}</span></div>
+          {!receipts.length ? <div className="empty compact-empty">К этой оплате чек ещё не прикреплён</div> : receipts.map((receipt) => {
+            const isImage = receipt.mimeType?.startsWith("image/");
+            const available = receipt.fileUrl && receipt.fileUrl !== "#";
+            return <article className="receipt-card" key={receipt.id}>
+              <header><span><strong>{receipt.fileName}</strong><small>{receipt.uploadedAt ? date(receipt.uploadedAt) : "Дата загрузки не указана"}{receipt.fileSize ? ` · ${Math.ceil(receipt.fileSize / 1024)} КБ` : ""}</small></span>{available && <a className="button" href={receipt.fileUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Открыть</a>}</header>
+              {available && isImage && <img src={receipt.fileUrl} alt={`Чек ${receipt.fileName}`} />}
+              {available && !isImage && <iframe src={receipt.fileUrl} title={`Чек ${receipt.fileName}`} />}
+            </article>;
+          })}
+        </section>
+        <div className="modal-actions"><button className="button primary" onClick={onClose}>Закрыть</button></div>
+      </section>
+    </div>
+  );
+}
+
+function SimpleTable({ headers, rows, onRowClick }: { headers: string[]; rows: React.ReactNode[][]; onRowClick?: (index: number) => void }) {
   if (!rows.length) return <div className="empty">Записей пока нет</div>;
-  return <div className="table-card"><table><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
+  return <div className="table-card"><table><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} className={onRowClick ? "clickable-row" : ""} onClick={() => onRowClick?.(i)}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
 function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, null>; data: AppData; onClose: () => void; onSave: (data: AppData, message: string) => void }) {
@@ -978,3 +1035,4 @@ function Select({ name, label, options, defaultValue }: { name: string; label: s
 function methodName(value: string) { return ({ cash: "Наличные", bank_transfer: "Банк", sbp: "СБП", card: "Карта", other: "Другое" } as Record<string, string>)[value] ?? value; }
 function unitTypeName(value: string) { return ({ storage: "Кладовка", garage: "Гараж", box: "Бокс" } as Record<string, string>)[value] ?? value; }
 function priorityName(value: string) { return ({ low: "Низкий", medium: "Средний", high: "Высокий" } as Record<string, string>)[value] ?? value; }
+function chargeTypeName(value: string) { return ({ rent: "Аренда", deposit: "Депозит", penalty: "Пени", other: "Другое" } as Record<string, string>)[value] ?? value; }
