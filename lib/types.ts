@@ -50,6 +50,7 @@ export interface PaymentSettings {
 }
 export interface LandlordProfile {
   fullName: string; passport: string; registrationAddress: string; phone: string; email: string; taxId: string;
+  bankName: string; cardNumber: string;
 }
 export interface LandlordSettings {
   individual: LandlordProfile;

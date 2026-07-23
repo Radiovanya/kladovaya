@@ -8,6 +8,7 @@ const ruDate = (value: string) => {
 };
 
 const number = (value: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
+const cardNumber = (value: string) => value.replace(/\D/g, "").replace(/(.{4})(?=.)/g, "$1 ");
 
 export function nextContractNumber(contracts: Contract[], now = new Date()) {
   const year = now.getFullYear();
@@ -40,10 +41,10 @@ export function generateRentalContract(template: string, data: AppData, contract
     fullName: data.paymentSettings?.recipientName || "ИП Маньковский Алексей Александрович",
     passport: "", registrationAddress: "", phone: "+79033314445",
     email: data.paymentSettings?.receiptEmail || "payments@klad-v.ru",
-    taxId: data.paymentSettings?.taxId || "632139808096"
+    taxId: data.paymentSettings?.taxId || "632139808096", bankName: "", cardNumber: ""
   };
   const individualFallback: LandlordProfile = {
-    fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: ""
+    fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: ""
   };
   const landlord = landlordType === "individual"
     ? (data.landlordSettings?.individual ?? individualFallback)
@@ -89,7 +90,7 @@ export function generateRentalContract(template: string, data: AppData, contract
   result = replaceFirst(result, /13\.1\. Все уведомления и сообщения по настоящему договору могут направляться:\n- по электронной почте:[^\n]*\n- посредством смс-сообщений на номер телефона:[^\n]*/, `13.1. Все уведомления и сообщения по настоящему договору могут направляться:\n- по электронной почте: ${customer.email || "не указана"};\n- посредством смс-сообщений на номер телефона: ${customer.phone || "не указан"}.`);
 
   const landlordDetails = landlordType === "individual"
-    ? `**Арендодатель**  \nФИО: ${landlordName}  \nПаспорт: ${landlord.passport || "не указан"}  \nМесто регистрации: ${landlord.registrationAddress || "не указано"}  \nТелефон: ${landlord.phone || "не указан"}  \nE-mail: ${landlord.email || "не указан"}  \nПодпись: ___________________/___________________`
+    ? `**Арендодатель**  \nФИО: ${landlordName}  \nПаспорт: ${landlord.passport || "не указан"}  \nМесто регистрации: ${landlord.registrationAddress || "не указано"}  \nТелефон: ${landlord.phone || "не указан"}  \nE-mail: ${landlord.email || "не указан"}  \nБанк: ${landlord.bankName || "не указан"}  \nНомер карты: ${landlord.cardNumber ? cardNumber(landlord.cardNumber) : "не указан"}  \nПодпись: ___________________/___________________`
     : `**Арендодатель**  \n${landlordName}  \nИНН: ${landlord.taxId || "не указан"}  \nТелефон: ${landlord.phone || "не указан"}  \nE-mail: ${landlord.email || "не указан"}  \nПодпись: ___________________/___________________`;
   const tenantDetails = `**Арендатор**  \nФИО/Наименование: ${customer.fullName}  \nАдрес: ${customer.address || "не указан"}  \nПаспорт/ИНН/ОГРН: ${customer.passportOrRegistrationData || customer.taxId || "не указаны"}  \nТелефон: ${customer.phone || "не указан"}  \nE-mail: ${customer.email || "не указан"}${customer.note ? `  \nПримечание: ${customer.note}` : ""}  \nПодпись: ___________________/___________________`;
   result = replaceFirst(result, /\*\*Арендодатель\*\*  \n[\s\S]*?(?=\n\n\*\*Арендатор\*\*)/, landlordDetails);

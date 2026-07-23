@@ -470,10 +470,10 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
     bic: "", correspondentAccount: "", receiptEmail: ""
   };
   const landlordSettings: LandlordSettings = data.landlordSettings ?? {
-    individual: { fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "" },
+    individual: { fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: "" },
     entrepreneur: {
       fullName: settings.recipientName || "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
-      phone: "+79033314445", email: settings.receiptEmail || "payments@klad-v.ru", taxId: settings.taxId || "632139808096"
+      phone: "+79033314445", email: settings.receiptEmail || "payments@klad-v.ru", taxId: settings.taxId || "632139808096", bankName: "", cardNumber: ""
     }
   };
   const [validationError, setValidationError] = useState("");
@@ -493,6 +493,10 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
     };
     const errors = paymentSettingsErrors(candidate);
     if (errors.length) { setValidationError(`Не удалось сохранить: ${errors.join("; ")}.`); return; }
+    const individualCardNumber = String(form.get("individualCardNumber") ?? "").replace(/\D/g, "");
+    if (individualCardNumber && !/^\d{16,19}$/.test(individualCardNumber)) {
+      setValidationError("Не удалось сохранить: номер карты физического лица должен содержать от 16 до 19 цифр."); return;
+    }
     setValidationError("");
     next.paymentSettings = candidate;
     next.landlordSettings = {
@@ -502,14 +506,16 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
         registrationAddress: String(form.get("individualRegistrationAddress") ?? "").trim(),
         phone: String(form.get("individualPhone") ?? "").trim(),
         email: String(form.get("individualEmail") ?? "").trim(),
-        taxId: ""
+        taxId: "",
+        bankName: String(form.get("individualBankName") ?? "").trim(),
+        cardNumber: individualCardNumber
       },
       entrepreneur: {
         fullName: String(form.get("entrepreneurFullName") ?? "").trim(),
         passport: "", registrationAddress: "",
         phone: String(form.get("entrepreneurPhone") ?? "").trim(),
         email: String(form.get("entrepreneurEmail") ?? "").trim(),
-        taxId: String(form.get("entrepreneurTaxId") ?? "").replace(/\D/g, "")
+        taxId: String(form.get("entrepreneurTaxId") ?? "").replace(/\D/g, ""), bankName: "", cardNumber: ""
       }
     };
     onSave(next, "Платёжные реквизиты и данные арендодателей сохранены");
@@ -543,6 +549,8 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
           <Field name="individualRegistrationAddress" label="Место регистрации" wide defaultValue={landlordSettings.individual.registrationAddress} />
           <Field name="individualPhone" label="Телефон" defaultValue={landlordSettings.individual.phone} />
           <Field name="individualEmail" label="Email" type="email" defaultValue={landlordSettings.individual.email} />
+          <Field name="individualBankName" label="Банк для оплаты" defaultValue={landlordSettings.individual.bankName} />
+          <Field name="individualCardNumber" label="Номер карты" defaultValue={landlordSettings.individual.cardNumber} />
         </div>
       </section>
       <section className="panel settings-panel">

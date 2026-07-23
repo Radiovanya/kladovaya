@@ -13,11 +13,11 @@ export const seedData: AppData = {
   },
   landlordSettings: {
     individual: {
-      fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: ""
+      fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: ""
     },
     entrepreneur: {
       fullName: "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
-      phone: "+79033314445", email: "payments@klad-v.ru", taxId: "632139808096"
+      phone: "+79033314445", email: "payments@klad-v.ru", taxId: "632139808096", bankName: "", cardNumber: ""
     }
   },
   paymentRequests: [],

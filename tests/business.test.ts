@@ -157,13 +157,17 @@ test("договор можно сформировать от физическо
     registrationAddress: "г. Тольятти, ул. Примерная, 1",
     phone: "+79033314445",
     email: "owner@klad-v.ru",
-    taxId: ""
+    taxId: "",
+    bankName: "ТБанк",
+    cardNumber: "2200123456789012"
   };
   const document = generateRentalContract(template, data, 1, "individual");
   assert.match(document, /Маньковский Алексей Александрович, паспорт: 36 02 386312/);
   assert.match(document, /ФИО: Маньковский Алексей Александрович/);
   assert.match(document, /Место регистрации: г\. Тольятти, ул\. Примерная, 1/);
   assert.match(document, /E-mail: owner@klad-v\.ru/);
+  assert.match(document, /Банк: ТБанк/);
+  assert.match(document, /Номер карты: 2200 1234 5678 9012/);
   assert.match(document, /Арендодатель: Маньковский Алексей Александрович \(физическое лицо\)/);
   assert.doesNotMatch(document, /ИНН: 632139808096/);
 });
