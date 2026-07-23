@@ -26,6 +26,10 @@ export function useAppStore() {
           ...cloneSeed(),
           ...parsed,
           paymentSettings: { ...seedData.paymentSettings!, ...(parsed.paymentSettings ?? {}) },
+          landlordSettings: {
+            individual: { ...seedData.landlordSettings!.individual, ...(parsed.landlordSettings?.individual ?? {}) },
+            entrepreneur: { ...seedData.landlordSettings!.entrepreneur, ...(parsed.landlordSettings?.entrepreneur ?? {}) }
+          },
           paymentRequests: parsed.paymentRequests ?? []
           };
         })()

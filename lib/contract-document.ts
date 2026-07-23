@@ -1,4 +1,4 @@
-import type { AppData, Contract } from "./types";
+import type { AppData, Contract, LandlordProfile, LandlordType } from "./types";
 
 const ruDate = (value: string) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -22,7 +22,7 @@ function replaceFirst(source: string, search: string | RegExp, replacement: stri
   return source.replace(search, replacement);
 }
 
-export function generateRentalContract(template: string, data: AppData, contractId: number) {
+export function generateRentalContract(template: string, data: AppData, contractId: number, landlordType: LandlordType = "entrepreneur") {
   const contract = data.contracts.find((item) => item.id === contractId);
   if (!contract) throw new Error("Договор не найден");
   const customer = data.customers.find((item) => item.id === contract.customerId);
@@ -36,8 +36,22 @@ export function generateRentalContract(template: string, data: AppData, contract
       ? { title: "бокса", nominative: "Бокс", genitive: "Бокса", accusative: "Бокс", lower: "бокс", located: "расположенный" }
       : { title: "кладовой", nominative: "Кладовая", genitive: "Кладовой", accusative: "Кладовую", lower: "кладовую", located: "расположенную" };
   const city = location.address.split(",")[0]?.trim() || "__________";
-  const landlord = data.paymentSettings?.recipientName || "____________________________________________";
-  const landlordTaxId = data.paymentSettings?.taxId || "____________________________";
+  const entrepreneurFallback: LandlordProfile = {
+    fullName: data.paymentSettings?.recipientName || "ИП Маньковский Алексей Александрович",
+    passport: "", registrationAddress: "", phone: "+79033314445",
+    email: data.paymentSettings?.receiptEmail || "payments@klad-v.ru",
+    taxId: data.paymentSettings?.taxId || "632139808096"
+  };
+  const individualFallback: LandlordProfile = {
+    fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: ""
+  };
+  const landlord = landlordType === "individual"
+    ? (data.landlordSettings?.individual ?? individualFallback)
+    : (data.landlordSettings?.entrepreneur ?? entrepreneurFallback);
+  const landlordName = landlord.fullName || "____________________________________________";
+  const landlordIntro = landlordType === "individual"
+    ? `${landlordName}, паспорт: ${landlord.passport || "____________________________"}, зарегистрированный по адресу: ${landlord.registrationAddress || "____________________________________________"}`
+    : `${landlordName}, ИНН: ${landlord.taxId || "____________________________"}`;
   const notes = [
     customer.note && `Примечание к клиенту: ${customer.note}`,
     location.description && `Описание адреса: ${location.description}`,
@@ -61,7 +75,7 @@ export function generateRentalContract(template: string, data: AppData, contract
   result = replaceFirst(
     result,
     /\*\*Арендодатель:\*\*[\s\S]*?совместно именуемые «Стороны», заключили настоящий договор о нижеследующем\./,
-    `**Арендодатель:** ${landlord}, с одной стороны, и  \n**Арендатор:** ${customer.fullName}, ${customer.passportOrRegistrationData || customer.taxId || "паспорт/реквизиты не указаны"}, с другой стороны, совместно именуемые «Стороны», заключили настоящий договор о нижеследующем.`
+    `**Арендодатель:** ${landlordIntro}, с одной стороны, и  \n**Арендатор:** ${customer.fullName}, ${customer.passportOrRegistrationData || customer.taxId || "паспорт/реквизиты не указаны"}, с другой стороны, совместно именуемые «Стороны», заключили настоящий договор о нижеследующем.`
   );
   result = replaceFirst(
     result,
@@ -74,10 +88,12 @@ export function generateRentalContract(template: string, data: AppData, contract
   result = replaceFirst(result, /4\.4\. Помимо арендной платы, Арендатор вносит обеспечительный платеж в размере[^\n]*/, `4.4. Помимо арендной платы, Арендатор вносит обеспечительный платеж в размере ${number(unit.depositAmount)} рублей в целях обеспечения исполнения обязательств по настоящему договору, в том числе обязательств по оплате аренды, неустойки, возмещению убытков и иных платежей.`);
   result = replaceFirst(result, /13\.1\. Все уведомления и сообщения по настоящему договору могут направляться:\n- по электронной почте:[^\n]*\n- посредством смс-сообщений на номер телефона:[^\n]*/, `13.1. Все уведомления и сообщения по настоящему договору могут направляться:\n- по электронной почте: ${customer.email || "не указана"};\n- посредством смс-сообщений на номер телефона: ${customer.phone || "не указан"}.`);
 
+  const landlordDetails = landlordType === "individual"
+    ? `**Арендодатель**  \nФИО: ${landlordName}  \nПаспорт: ${landlord.passport || "не указан"}  \nМесто регистрации: ${landlord.registrationAddress || "не указано"}  \nТелефон: ${landlord.phone || "не указан"}  \nE-mail: ${landlord.email || "не указан"}  \nПодпись: ___________________/___________________`
+    : `**Арендодатель**  \n${landlordName}  \nИНН: ${landlord.taxId || "не указан"}  \nТелефон: ${landlord.phone || "не указан"}  \nE-mail: ${landlord.email || "не указан"}  \nПодпись: ___________________/___________________`;
   const tenantDetails = `**Арендатор**  \nФИО/Наименование: ${customer.fullName}  \nАдрес: ${customer.address || "не указан"}  \nПаспорт/ИНН/ОГРН: ${customer.passportOrRegistrationData || customer.taxId || "не указаны"}  \nТелефон: ${customer.phone || "не указан"}  \nE-mail: ${customer.email || "не указан"}${customer.note ? `  \nПримечание: ${customer.note}` : ""}  \nПодпись: ___________________/___________________`;
+  result = replaceFirst(result, /\*\*Арендодатель\*\*  \n[\s\S]*?(?=\n\n\*\*Арендатор\*\*)/, landlordDetails);
   result = replaceFirst(result, /\*\*Арендатор\*\*  \nФИО\/Наименование:[\s\S]*?Подпись: ___________________\/___________________/, tenantDetails);
-  result = replaceFirst(result, /Наименование\/ФИО: _+/, `Наименование/ФИО: ${landlord}`);
-  result = replaceFirst(result, /ИНН\/ОГРН\/паспорт: _+/, `ИНН/ОГРН/паспорт: ${landlordTaxId}`);
 
   result = result.replace(
     /Арендодатель передал, а Арендатор принял [^\n]+/,
@@ -88,7 +104,7 @@ export function generateRentalContract(template: string, data: AppData, contract
     .replace(/2\.1\. Обеспечительный платеж составляет[^\n]*/, `2.1. Обеспечительный платеж составляет ${number(unit.depositAmount)} рублей и вносится до передачи объекта Арендатору.`)
     .replace(/3\.3\. Исходя из базовой месячной ставки[^\n]*/, `3.3. Размер платы по пункту 3.2 составляет ${number(unit.monthlyRate * 0.1)} рублей за каждый день просрочки освобождения объекта.`);
 
-  const summary = `\n\n## Сведения из системы\n\n- Номер договора: ${contract.contractNumber}\n- Арендатор: ${customer.fullName}\n- Телефон: ${customer.phone || "не указан"}\n- E-mail: ${customer.email || "не указан"}\n- Паспорт/реквизиты: ${customer.passportOrRegistrationData || customer.taxId || "не указаны"}\n- Адрес арендатора: ${customer.address || "не указан"}\n- Адрес объекта: ${location.address}\n- ${objectDetails}\n- Арендная ставка: ${number(unit.monthlyRate)} рублей в месяц\n- Депозит: ${number(unit.depositAmount)} рублей\n- Период: ${ruDate(contract.startDate)} — ${ruDate(contract.endDate)}${notes.length ? `\n- ${notes.join("\n- ")}` : ""}\n`;
+  const summary = `\n\n## Сведения из системы\n\n- Номер договора: ${contract.contractNumber}\n- Арендодатель: ${landlordName} (${landlordType === "individual" ? "физическое лицо" : "индивидуальный предприниматель"})\n- Арендатор: ${customer.fullName}\n- Телефон: ${customer.phone || "не указан"}\n- E-mail: ${customer.email || "не указан"}\n- Паспорт/реквизиты: ${customer.passportOrRegistrationData || customer.taxId || "не указаны"}\n- Адрес арендатора: ${customer.address || "не указан"}\n- Адрес объекта: ${location.address}\n- ${objectDetails}\n- Арендная ставка: ${number(unit.monthlyRate)} рублей в месяц\n- Депозит: ${number(unit.depositAmount)} рублей\n- Период: ${ruDate(contract.startDate)} — ${ruDate(contract.endDate)}${notes.length ? `\n- ${notes.join("\n- ")}` : ""}\n`;
   return result.replace("\n## 1. Предмет договора", `${summary}\n## 1. Предмет договора`).trim() + "\n";
 }
 

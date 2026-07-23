@@ -11,6 +11,15 @@ export const seedData: AppData = {
     correspondentAccount: "",
     receiptEmail: ""
   },
+  landlordSettings: {
+    individual: {
+      fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: ""
+    },
+    entrepreneur: {
+      fullName: "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
+      phone: "+79033314445", email: "payments@klad-v.ru", taxId: "632139808096"
+    }
+  },
   paymentRequests: [],
   locations: [
     { id: 1, name: "Северная, 12", address: "Санкт-Петербург, ул. Северная, 12", description: "Основной складской комплекс", isActive: true },

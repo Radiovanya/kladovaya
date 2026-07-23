@@ -3,7 +3,7 @@
 import {
   Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
   Copy, CreditCard, Download, ExternalLink, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, Users, Warehouse, X
+  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
@@ -12,7 +12,7 @@ import { contractFileName, generateRentalContract, nextContractNumber } from "@/
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, PaymentSettings, Role, TaskStatus, UnitStatus } from "@/lib/types";
+import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, Role, TaskStatus, UnitStatus } from "@/lib/types";
 
 type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
 type EntityType = Page | "documents";
@@ -469,6 +469,13 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
     bankName: "Т-Банк", recipientName: "", taxId: "", kpp: "", accountNumber: "",
     bic: "", correspondentAccount: "", receiptEmail: ""
   };
+  const landlordSettings: LandlordSettings = data.landlordSettings ?? {
+    individual: { fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "" },
+    entrepreneur: {
+      fullName: settings.recipientName || "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
+      phone: "+79033314445", email: settings.receiptEmail || "payments@klad-v.ru", taxId: settings.taxId || "632139808096"
+    }
+  };
   const [validationError, setValidationError] = useState("");
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -488,7 +495,24 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
     if (errors.length) { setValidationError(`Не удалось сохранить: ${errors.join("; ")}.`); return; }
     setValidationError("");
     next.paymentSettings = candidate;
-    onSave(next, "Платёжные реквизиты сохранены");
+    next.landlordSettings = {
+      individual: {
+        fullName: String(form.get("individualFullName") ?? "").trim(),
+        passport: String(form.get("individualPassport") ?? "").trim(),
+        registrationAddress: String(form.get("individualRegistrationAddress") ?? "").trim(),
+        phone: String(form.get("individualPhone") ?? "").trim(),
+        email: String(form.get("individualEmail") ?? "").trim(),
+        taxId: ""
+      },
+      entrepreneur: {
+        fullName: String(form.get("entrepreneurFullName") ?? "").trim(),
+        passport: "", registrationAddress: "",
+        phone: String(form.get("entrepreneurPhone") ?? "").trim(),
+        email: String(form.get("entrepreneurEmail") ?? "").trim(),
+        taxId: String(form.get("entrepreneurTaxId") ?? "").replace(/\D/g, "")
+      }
+    };
+    onSave(next, "Платёжные реквизиты и данные арендодателей сохранены");
   }
   return (
     <form className="settings-layout" onSubmit={submit}>
@@ -509,6 +533,27 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
         <div className="panel-head"><h2>Почта для чеков</h2></div>
         <p className="settings-note">Адрес будет добавляться в инструкцию клиенту. Автоматический приём и распознавание писем включим после подключения почтового backend.</p>
         <div className="form-grid"><Field name="receiptEmail" label="Email для чеков" type="email" wide defaultValue={settings.receiptEmail} /></div>
+      </section>
+      <section className="panel settings-panel">
+        <div className="panel-head"><h2>Арендодатель — физическое лицо</h2><UserRound size={20} /></div>
+        <p className="settings-note">Эти данные подставляются в договор, когда сотрудник выбирает физическое лицо.</p>
+        <div className="form-grid">
+          <Field name="individualFullName" label="ФИО" wide defaultValue={landlordSettings.individual.fullName} />
+          <Field name="individualPassport" label="Паспорт" wide defaultValue={landlordSettings.individual.passport} />
+          <Field name="individualRegistrationAddress" label="Место регистрации" wide defaultValue={landlordSettings.individual.registrationAddress} />
+          <Field name="individualPhone" label="Телефон" defaultValue={landlordSettings.individual.phone} />
+          <Field name="individualEmail" label="Email" type="email" defaultValue={landlordSettings.individual.email} />
+        </div>
+      </section>
+      <section className="panel settings-panel">
+        <div className="panel-head"><h2>Арендодатель — ИП</h2><Building2 size={20} /></div>
+        <p className="settings-note">Реквизиты ИП используются в договоре независимо от получателя банковского платежа.</p>
+        <div className="form-grid">
+          <Field name="entrepreneurFullName" label="Наименование / ФИО" wide defaultValue={landlordSettings.entrepreneur.fullName} />
+          <Field name="entrepreneurTaxId" label="ИНН" defaultValue={landlordSettings.entrepreneur.taxId} />
+          <Field name="entrepreneurPhone" label="Телефон" defaultValue={landlordSettings.entrepreneur.phone} />
+          <Field name="entrepreneurEmail" label="Email" type="email" wide defaultValue={landlordSettings.entrepreneur.email} />
+        </div>
       </section>
       {validationError && <div className="form-error">{validationError}</div>}
       <div className="settings-actions"><button className="button primary"><Save size={16} />Сохранить реквизиты</button></div>
@@ -699,20 +744,22 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [landlordType, setLandlordType] = useState<LandlordType>("entrepreneur");
 
   useEffect(() => {
     const controller = new AbortController();
+    setContent(""); setError(""); setSent(false);
     fetch("/dogovor_arendy_kladovoi_RF.md", { signal: controller.signal, cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("Не удалось загрузить шаблон договора");
         return response.text();
       })
-      .then((template) => setContent(generateRentalContract(template, data, contractId)))
+      .then((template) => setContent(generateRentalContract(template, data, contractId, landlordType)))
       .catch((caught) => {
         if ((caught as Error).name !== "AbortError") setError(caught instanceof Error ? caught.message : "Не удалось сформировать договор");
       });
     return () => controller.abort();
-  }, [contractId, data]);
+  }, [contractId, data, landlordType]);
 
   function download() {
     const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
@@ -757,8 +804,15 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
       <section className="modal contract-modal">
-        <div className="modal-head"><div><h2>Договор {contract.contractNumber}</h2><small>Данные подставлены из карточек клиента, адреса, объекта и договора</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
-        {error && <div className="form-error">{error}</div>}
+        <div className="contract-modal-top">
+          <div className="modal-head"><div><h2>Договор {contract.contractNumber}</h2><small>Данные подставлены из карточек клиента, адреса, объекта и договора</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+          <div className="contract-party-picker" role="radiogroup" aria-label="Выбор арендодателя">
+            <span>Сформировать договор от имени:</span>
+            <button type="button" role="radio" aria-checked={landlordType === "individual"} className={landlordType === "individual" ? "active" : ""} onClick={() => setLandlordType("individual")}><UserRound size={20} /><span><strong>Физическое лицо</strong><small>ФИО и паспорт</small></span></button>
+            <button type="button" role="radio" aria-checked={landlordType === "entrepreneur"} className={landlordType === "entrepreneur" ? "active" : ""} onClick={() => setLandlordType("entrepreneur")}><Building2 size={20} /><span><strong>ИП</strong><small>ИНН и реквизиты ИП</small></span></button>
+          </div>
+          {error && <div className="form-error">{error}</div>}
+        </div>
         {!content && !error && <div className="empty">Формируем договор…</div>}
         {content && <article className="contract-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }} />}
         <div className="modal-actions contract-actions">

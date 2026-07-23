@@ -3,6 +3,7 @@ export type ContractStatus = "draft" | "active" | "expired" | "terminated";
 export type ChargeStatus = "pending" | "paid" | "partial" | "overdue" | "cancelled";
 export type TaskStatus = "open" | "in_progress" | "sent" | "paid" | "done";
 export type Role = "Admin" | "Manager" | "Accountant";
+export type LandlordType = "individual" | "entrepreneur";
 
 export interface Location {
   id: number; name: string; address: string; description: string; isActive: boolean;
@@ -47,6 +48,13 @@ export interface PaymentSettings {
   bankName: string; recipientName: string; taxId: string; kpp: string; accountNumber: string;
   bic: string; correspondentAccount: string; receiptEmail: string;
 }
+export interface LandlordProfile {
+  fullName: string; passport: string; registrationAddress: string; phone: string; email: string; taxId: string;
+}
+export interface LandlordSettings {
+  individual: LandlordProfile;
+  entrepreneur: LandlordProfile;
+}
 export interface PaymentRequest {
   id: number; contractId: number; period: string; amount: number; purpose: string;
   recipientEmail: string; status: "prepared" | "sent" | "paid" | "expired"; createdAt: string;
@@ -56,5 +64,6 @@ export interface AppData {
   charges: Charge[]; payments: Payment[]; tasks: Task[]; documents: DocumentItem[]; users: User[];
   archivedIds?: Record<string, number[]>;
   paymentSettings?: PaymentSettings;
+  landlordSettings?: LandlordSettings;
   paymentRequests?: PaymentRequest[];
 }
