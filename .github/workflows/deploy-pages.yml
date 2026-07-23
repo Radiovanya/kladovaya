@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Security and build checks
 
 on:
   push:
@@ -8,12 +8,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -39,24 +33,5 @@ jobs:
       - name: Test business rules
         run: pnpm test
 
-      - name: Build static application
+      - name: Build production application
         run: pnpm build
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: out
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
