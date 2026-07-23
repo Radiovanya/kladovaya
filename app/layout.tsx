@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   applicationName: "Кладовая",
   manifest: "/manifest.webmanifest",
   formatDetection: { telephone: false },
+  other: { "apple-mobile-web-app-capable": "yes" },
   appleWebApp: {
     capable: true,
     title: "Кладовая",
