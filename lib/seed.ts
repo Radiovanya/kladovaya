@@ -16,8 +16,7 @@ export const seedData: AppData = {
       fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: ""
     },
     entrepreneur: {
-      fullName: "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
-      phone: "+79033314445", email: "payments@klad-v.ru", taxId: "632139808096", bankName: "", cardNumber: ""
+      fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: ""
     }
   },
   paymentRequests: [],

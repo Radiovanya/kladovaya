@@ -10,13 +10,23 @@ WorkingDirectory=/opt/kladovaya/app
 EnvironmentFile=/opt/kladovaya/.env
 Environment=PORT=3000
 Environment=HOSTNAME=127.0.0.1
-ExecStart=/usr/bin/node /opt/kladovaya/app/server.js
+ExecStart=/opt/nodejs/bin/node /opt/kladovaya/app/server.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+PrivateDevices=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
 ReadWritePaths=/opt/kladovaya
 
 [Install]

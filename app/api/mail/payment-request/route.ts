@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { buildPaymentQrPayload } from "@/lib/business";
 import { getSession } from "@/lib/server/auth";
 import type { PaymentSettings } from "@/lib/types";
+import { isContractRecipient } from "@/lib/server/recipient";
+import { hasTrustedOrigin, isValidEmail, readBoundedJson } from "@/lib/server/security";
 
 export const runtime = "nodejs";
 
@@ -15,13 +17,22 @@ const escapeHtml = (value: unknown) => String(value ?? "")
 
 export async function POST(request: Request) {
   if (!(await getSession())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => null) as {
+  if (!hasTrustedOrigin(request)) return NextResponse.json({ error: "Недопустимый источник запроса" }, { status: 403 });
+  let body: {
     to?: string; customerName?: string; contractNumber?: string; periodLabel?: string;
     amountLabel?: string; amount?: number; purpose?: string; receiptEmail?: string;
     paymentDetails?: { recipientName?: string; taxId?: string; bankName?: string; bic?: string; accountNumber?: string; correspondentAccount?: string; kpp?: string };
   } | null;
+  try {
+    body = await readBoundedJson(request, 64 * 1024);
+  } catch {
+    return NextResponse.json({ error: "Слишком большой запрос" }, { status: 413 });
+  }
   if (!body?.to || !body.contractNumber || !body.purpose || !body.amount || !body.paymentDetails) {
     return NextResponse.json({ error: "Недостаточно данных" }, { status: 400 });
+  }
+  if (!isValidEmail(body.to) || !(await isContractRecipient(body.contractNumber, body.to))) {
+    return NextResponse.json({ error: "Получатель не совпадает с email клиента в договоре" }, { status: 400 });
   }
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
     return NextResponse.json({ error: "Почтовый ящик ещё не подключён" }, { status: 503 });
@@ -65,7 +76,9 @@ export async function POST(request: Request) {
     attachments: [
       { filename: `qr-${body.contractNumber}.png`, content: qrBuffer, cid: "payment-qr" },
       { filename: `qr-${body.contractNumber}-large.png`, content: qrBuffer, contentDisposition: "attachment" }
-    ]
+    ],
+    disableFileAccess: true,
+    disableUrlAccess: true
   });
   return NextResponse.json({ ok: true });
 }

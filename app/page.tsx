@@ -457,7 +457,12 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
         {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [<strong key="contract">{x.contractNumber}</strong>, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} onRowClick={(index) => onContractDocument(contracts[index].id)} />}
         {tab === "charges" && <SimpleTable headers={["Период", "Срок", "Сумма", "Оплачено", "Статус"]} rows={charges.map((x) => [`${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))])} />}
         {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="amount">{money(x.amount)}</strong>])} onRowClick={(index) => onPayment(payments[index].id)} />}
-        {tab === "documents" && <SimpleTable headers={["Файл", "Тип"]} rows={documents.map((x) => [x.fileName, x.documentType])} />}
+        {tab === "documents" && <SimpleTable headers={["Файл", "Тип"]} rows={documents.map((x) => [
+          x.fileUrl.startsWith("/api/documents?key=")
+            ? <a key="file" href={x.fileUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{x.fileName}</a>
+            : x.fileName,
+          x.documentType
+        ])} />}
         {tab === "tasks" && <SimpleTable headers={["Задача", "Срок", "Статус"]} rows={tasks.map((x) => [x.title, date(x.dueDate), badge(x.status)])} />}
       </div>
     </section>
@@ -472,8 +477,8 @@ function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: A
   const landlordSettings: LandlordSettings = data.landlordSettings ?? {
     individual: { fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: "" },
     entrepreneur: {
-      fullName: settings.recipientName || "ИП Маньковский Алексей Александрович", passport: "", registrationAddress: "",
-      phone: "+79033314445", email: settings.receiptEmail || "payments@klad-v.ru", taxId: settings.taxId || "632139808096", bankName: "", cardNumber: ""
+      fullName: settings.recipientName || "", passport: "", registrationAddress: "", phone: "",
+      email: settings.receiptEmail || "", taxId: settings.taxId || "", bankName: "", cardNumber: ""
     }
   };
   const [validationError, setValidationError] = useState("");

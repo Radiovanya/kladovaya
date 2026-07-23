@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/server/auth";
+import { hasTrustedOrigin, readBoundedJson } from "@/lib/server/security";
 import { seedData } from "@/lib/seed";
 import type { AppData } from "@/lib/types";
 
@@ -27,9 +28,13 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   if (!(await getSession())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > 2 * 1024 * 1024) return NextResponse.json({ error: "Payload too large" }, { status: 413 });
-  const body = await request.json().catch(() => null) as { data?: unknown } | null;
+  if (!hasTrustedOrigin(request)) return NextResponse.json({ error: "Недопустимый источник запроса" }, { status: 403 });
+  let body: { data?: unknown } | null;
+  try {
+    body = await readBoundedJson(request, 2 * 1024 * 1024);
+  } catch {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
   if (!validAppData(body?.data)) return NextResponse.json({ error: "Некорректные данные" }, { status: 400 });
 
   const state = await prisma.appState.upsert({

@@ -7,7 +7,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { findContractNumber, findPaymentPeriod } from "@/lib/receipt-email";
 import { assertS3Configured, documentsBucket, s3 } from "@/lib/server/s3";
-import type { AppData, Charge, DocumentItem, Payment, Task } from "@/lib/types";
+import { secureEqual } from "@/lib/server/security";
+import type { AppData, DocumentItem, Task } from "@/lib/types";
+import { encryptDocument } from "@/lib/server/document-crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,29 +17,27 @@ export const maxDuration = 60;
 
 const allowedTypes = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
 const nextId = (items: Array<{ id: number }>) => Math.max(0, ...items.map((item) => item.id)) + 1;
-const pad = (value: number) => String(value).padStart(2, "0");
-
-function monthDates(period: string, billingDay: number) {
-  const [year, month] = period.split("-").map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-  return {
-    start: `${period}-01`,
-    end: `${period}-${pad(lastDay)}`,
-    due: `${period}-${pad(Math.min(Math.max(Math.trunc(billingDay || 1), 1), lastDay))}`
-  };
-}
-
-function manualTask(data: AppData, title: string, description: string) {
+function manualTask(data: AppData, title: string, description: string, contractId?: number, period?: string) {
   if (data.tasks.some((task) => task.description.includes(description))) return;
   data.tasks.push({
     id: nextId(data.tasks), title, description, dueDate: new Date().toISOString().slice(0, 16),
-    priority: "high", status: "open", relatedEntityType: null, relatedEntityId: null
+    priority: "high", status: "open", relatedEntityType: contractId ? "contract_payment" : null,
+    relatedEntityId: contractId ?? null, paymentPeriod: period
   } satisfies Task);
+}
+
+function detectedMime(content: Buffer) {
+  if (content.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff) return "image/jpeg";
+  if (content.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  return null;
 }
 
 export async function POST(request: Request) {
   const secret = process.env.RECEIPT_CRON_SECRET;
-  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+  const authorization = request.headers.get("authorization") ?? "";
+  if (!secret || !secureEqual(authorization, `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASSWORD) {
@@ -70,15 +70,15 @@ export async function POST(request: Request) {
         const text = `${parsed.subject ?? ""}\n${parsed.text ?? ""}\n${typeof parsed.html === "string" ? parsed.html.replace(/<[^>]+>/g, " ") : ""}`;
         const messageKey = createHash("sha256").update(parsed.messageId || `${uid}:${parsed.date?.toISOString() ?? ""}:${parsed.subject ?? ""}`).digest("hex").slice(0, 20);
         const referenceNumber = `EMAIL-${messageKey}`;
-        if (data.payments.some((payment) => payment.referenceNumber === referenceNumber || payment.comment.includes(referenceNumber))) {
+        if (data.payments.some((payment) => payment.referenceNumber === referenceNumber || payment.comment.includes(referenceNumber))
+          || data.tasks.some((task) => task.description.includes(referenceNumber))) {
           await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
           continue;
         }
         const contractNumber = findContractNumber(text, data.contracts.map((item) => item.contractNumber));
         const period = findPaymentPeriod(text);
-        const attachments = parsed.attachments.filter((attachment) =>
-          allowedTypes.has(attachment.contentType) && attachment.content.length <= 10 * 1024 * 1024
-        );
+        const attachments = parsed.attachments.map((attachment) => ({ attachment, mimeType: detectedMime(attachment.content) }))
+          .filter(({ attachment, mimeType }) => mimeType && allowedTypes.has(mimeType) && mimeType === attachment.contentType && attachment.content.length <= 10 * 1024 * 1024);
         processed += 1;
         if (!contractNumber || !period || attachments.length === 0) {
           manualTask(data, "Проверить входящий чек", `Письмо ${referenceNumber}: ${!contractNumber ? "не найден договор; " : ""}${!period ? "не найден период; " : ""}${attachments.length === 0 ? "нет PDF/JPG/PNG/WebP вложения" : ""}`);
@@ -88,47 +88,35 @@ export async function POST(request: Request) {
         }
         const contract = data.contracts.find((item) => item.contractNumber === contractNumber)!;
         const customer = data.customers.find((item) => item.id === contract.customerId)!;
-        let charge = data.charges.find((item) => item.contractId === contract.id && item.periodStart.slice(0, 7) === period);
-        if (!charge) {
-          const dates = monthDates(period, contract.billingDay);
-          charge = {
-            id: nextId(data.charges), contractId: contract.id, periodStart: dates.start, periodEnd: dates.end,
-            dueDate: dates.due, amount: contract.monthlyRate, chargeType: "rent", status: "pending",
-            note: "Создано автоматически по чеку из почты"
-          } satisfies Charge;
-          data.charges.push(charge);
+        const sender = parsed.from?.value[0]?.address?.trim().toLowerCase() ?? "";
+        if (!customer || !sender || sender !== customer.email.trim().toLowerCase()) {
+          manualTask(data, "Проверить отправителя чека", `Письмо ${referenceNumber}: отправитель ${sender || "не указан"} не совпадает с email клиента договора ${contractNumber}`, contract.id, period);
+          changed = true;
+          await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+          continue;
         }
-        const linkedPayments = data.payments.filter((item) => item.chargeId === charge!.id);
-        const paidAmount = linkedPayments.reduce((sum, item) => sum + item.amount, 0);
-        const outstanding = Math.max(0, charge.amount - paidAmount);
-        let payment = linkedPayments.at(-1);
-        if (!payment || outstanding > 0) {
-          payment = {
-            id: nextId(data.payments), customerId: customer.id, contractId: contract.id, chargeId: charge.id,
-            paymentDate: (parsed.date ?? new Date()).toISOString().slice(0, 10), amount: outstanding || charge.amount,
-            paymentMethod: "bank_transfer", referenceNumber,
-            comment: `Автоматически из письма за ${period}; отправитель: ${parsed.from?.text ?? "не указан"}`
-          } satisfies Payment;
-          data.payments.push(payment);
-        } else {
-          payment.comment = `${payment.comment}${payment.comment ? "; " : ""}чек ${referenceNumber}`;
-        }
-        charge.status = "paid";
-        const requestItem = [...data.paymentRequests].reverse().find((item) => item.contractId === contract.id && item.period === period);
-        if (requestItem) requestItem.status = "paid";
-        const task = data.tasks.find((item) => item.relatedEntityType === "contract_payment" && item.relatedEntityId === contract.id && item.paymentPeriod === period);
-        if (task) task.status = "paid";
-        for (const attachment of attachments) {
+        for (const { attachment, mimeType } of attachments) {
           const safeName = (attachment.filename ?? "receipt").normalize("NFKD").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120) || "receipt";
           const key = `receipts/${contract.id}/${period}/${randomUUID()}-${safeName}`;
-          await s3.send(new PutObjectCommand({ Bucket: documentsBucket, Key: key, Body: attachment.content, ContentType: attachment.contentType }));
+          const encrypted = encryptDocument(attachment.content, mimeType!);
+          await s3.send(new PutObjectCommand({
+            Bucket: documentsBucket, Key: key, Body: encrypted.body, ContentType: "application/octet-stream",
+            Metadata: { originalname: encodeURIComponent((attachment.filename ?? "receipt").slice(0, 200)), ...encrypted.metadata }
+          }));
           data.documents.push({
-            id: nextId(data.documents), entityType: "payment", entityId: payment.id,
+            id: nextId(data.documents), entityType: "contract", entityId: contract.id,
             fileName: attachment.filename ?? `receipt-${period}`, fileUrl: `/api/documents?key=${encodeURIComponent(key)}`,
-            documentType: "receipt", mimeType: attachment.contentType, fileSize: attachment.size,
+            documentType: "receipt", mimeType: mimeType!, fileSize: attachment.size,
             uploadedAt: new Date().toISOString()
           } satisfies DocumentItem);
         }
+        manualTask(
+          data,
+          `Подтвердить оплату · ${contractNumber} · ${period}`,
+          `Письмо ${referenceNumber}: чек получен от ${sender}. Проверьте сумму и поступление в банке, затем внесите оплату вручную.`,
+          contract.id,
+          period
+        );
         matched += 1;
         changed = true;
         await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });

@@ -38,10 +38,10 @@ export function generateRentalContract(template: string, data: AppData, contract
       : { title: "кладовой", nominative: "Кладовая", genitive: "Кладовой", accusative: "Кладовую", lower: "кладовую", located: "расположенную" };
   const city = location.address.split(",")[0]?.trim() || "__________";
   const entrepreneurFallback: LandlordProfile = {
-    fullName: data.paymentSettings?.recipientName || "ИП Маньковский Алексей Александрович",
-    passport: "", registrationAddress: "", phone: "+79033314445",
-    email: data.paymentSettings?.receiptEmail || "payments@klad-v.ru",
-    taxId: data.paymentSettings?.taxId || "632139808096", bankName: "", cardNumber: ""
+    fullName: data.paymentSettings?.recipientName || "",
+    passport: "", registrationAddress: "", phone: "",
+    email: data.paymentSettings?.receiptEmail || "",
+    taxId: data.paymentSettings?.taxId || "", bankName: "", cardNumber: ""
   };
   const individualFallback: LandlordProfile = {
     fullName: "", passport: "", registrationAddress: "", phone: "", email: "", taxId: "", bankName: "", cardNumber: ""
