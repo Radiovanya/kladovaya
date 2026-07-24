@@ -1,4 +1,4 @@
-import type { AppData, ChargeStatus, Contract, PaymentSettings, TaskStatus, UnitStatus } from "./types";
+import type { AppData, ChargeStatus, Contract, PaymentSettings, TaskStatus, UnitOperatingCosts, UnitStatus } from "./types";
 
 export const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
@@ -62,6 +62,140 @@ export function dashboardMetrics(data: AppData, now = new Date()) {
     endingContracts: data.contracts.filter((contract) =>
       contract.status === "active" && new Date(contract.endDate) >= now && new Date(contract.endDate) <= inThirtyDays
     ).length
+  };
+}
+
+const isoDate = (value: Date) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const dateAtMidnight = (value: string) => new Date(`${value}T00:00:00`);
+const daysBetweenInclusive = (start: string, end: string) =>
+  Math.max(0, Math.floor((dateAtMidnight(end).getTime() - dateAtMidnight(start).getTime()) / 86_400_000) + 1);
+
+export function ensureUnitStatusHistory(data: AppData, now = new Date()) {
+  const next = structuredClone(data);
+  next.unitStatusHistory ??= [];
+  let nextEventId = Math.max(0, ...next.unitStatusHistory.map((event) => event.id)) + 1;
+  const today = isoDate(now);
+  for (const unit of next.units) {
+    const hasOpenEvent = next.unitStatusHistory.some((event) => event.unitId === unit.id && event.endDate === null);
+    if (!hasOpenEvent) {
+      next.unitStatusHistory.push({
+        id: nextEventId++,
+        unitId: unit.id,
+        status: unit.status,
+        startDate: today,
+        endDate: null
+      });
+    }
+  }
+  return next;
+}
+
+export function recordUnitStatusChange(data: AppData, unitId: number, status: UnitStatus, changedAt = new Date()) {
+  const next = ensureUnitStatusHistory(data, changedAt);
+  const today = isoDate(changedAt);
+  const events = next.unitStatusHistory!;
+  const openEvent = [...events].reverse().find((event) => event.unitId === unitId && event.endDate === null);
+  if (openEvent?.status === status) return next;
+  if (openEvent?.startDate === today) {
+    openEvent.status = status;
+    return next;
+  }
+  if (openEvent) {
+    const previousDay = dateAtMidnight(today);
+    previousDay.setDate(previousDay.getDate() - 1);
+    openEvent.endDate = isoDate(previousDay);
+  }
+  events.push({
+    id: Math.max(0, ...events.map((event) => event.id)) + 1,
+    unitId,
+    status,
+    startDate: today,
+    endDate: null
+  });
+  return next;
+}
+
+export function unitOperatingCosts(data: AppData, unitId: number): UnitOperatingCosts {
+  return data.unitOperatingCosts?.find((item) => item.unitId === unitId) ?? {
+    unitId,
+    purchasePrice: 0,
+    monthlyPayment: 0,
+    annualMembershipFees: 0,
+    annualAdditionalExpenses: 0,
+    updatedAt: ""
+  };
+}
+
+export interface UnitAnalytics {
+  unitId: number;
+  purchasePrice: number;
+  monthlyRent: number;
+  rentalIncome: number;
+  operatingCosts: number;
+  profit: number;
+  yieldPercent: number;
+  idleDays: number;
+  trackingSince: string | null;
+}
+
+export function unitAnalytics(data: AppData, unitId: number, now = new Date()): UnitAnalytics {
+  const unit = data.units.find((item) => item.id === unitId);
+  if (!unit) throw new Error("Объект не найден");
+  const costs = unitOperatingCosts(data, unitId);
+  const contractIds = data.contracts.filter((contract) => contract.unitId === unitId).map((contract) => contract.id);
+  const periodStart = new Date(now);
+  periodStart.setFullYear(periodStart.getFullYear() - 1);
+  const startDate = isoDate(periodStart);
+  const endDate = isoDate(now);
+  const rentalIncome = data.payments
+    .filter((payment) => {
+      if (!contractIds.includes(payment.contractId) || payment.paymentDate < startDate || payment.paymentDate > endDate) return false;
+      const charge = payment.chargeId ? data.charges.find((item) => item.id === payment.chargeId) : undefined;
+      return !charge || charge.chargeType === "rent";
+    })
+    .reduce((sum, payment) => sum + payment.amount, 0);
+  const operatingCosts = costs.monthlyPayment * 12 + costs.annualMembershipFees + costs.annualAdditionalExpenses;
+  const events = (data.unitStatusHistory ?? []).filter((event) => event.unitId === unitId);
+  const idleDays = events
+    .filter((event) => event.status === "free" || event.status === "maintenance")
+    .reduce((sum, event) => {
+      const overlapStart = event.startDate > startDate ? event.startDate : startDate;
+      const eventEnd = event.endDate && event.endDate < endDate ? event.endDate : endDate;
+      return overlapStart <= eventEnd ? sum + daysBetweenInclusive(overlapStart, eventEnd) : sum;
+    }, 0);
+  return {
+    unitId,
+    purchasePrice: costs.purchasePrice,
+    monthlyRent: unit.monthlyRate,
+    rentalIncome,
+    operatingCosts,
+    profit: rentalIncome - operatingCosts,
+    yieldPercent: costs.purchasePrice > 0 ? rentalIncome / costs.purchasePrice * 100 : 0,
+    idleDays,
+    trackingSince: events.length ? [...events].sort((a, b) => a.startDate.localeCompare(b.startDate))[0].startDate : null
+  };
+}
+
+export function portfolioAnalytics(data: AppData, unitIds: number[], now = new Date()) {
+  const rows = unitIds.map((unitId) => unitAnalytics(data, unitId, now));
+  const total = rows.reduce((result, row) => ({
+    purchasePrice: result.purchasePrice + row.purchasePrice,
+    monthlyRent: result.monthlyRent + row.monthlyRent,
+    rentalIncome: result.rentalIncome + row.rentalIncome,
+    operatingCosts: result.operatingCosts + row.operatingCosts,
+    profit: result.profit + row.profit,
+    idleDays: result.idleDays + row.idleDays
+  }), { purchasePrice: 0, monthlyRent: 0, rentalIncome: 0, operatingCosts: 0, profit: 0, idleDays: 0 });
+  return {
+    ...total,
+    yieldPercent: total.purchasePrice > 0 ? total.rentalIncome / total.purchasePrice * 100 : 0,
+    trackingSince: rows.map((row) => row.trackingSince).filter((value): value is string => Boolean(value)).sort()[0] ?? null
   };
 }
 
@@ -186,7 +320,7 @@ function paymentTaskStatus(data: AppData, contractId: number, period: string, no
 }
 
 export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppData {
-  const next = structuredClone(data);
+  const next = ensureUnitStatusHistory(data, now);
   const period = currentPaymentPeriod(now);
   const [year, month] = period.split("-").map(Number);
   const monthStart = new Date(year, month - 1, 1);

@@ -20,6 +20,23 @@ export const seedData: AppData = {
     }
   },
   paymentRequests: [],
+  unitOperatingCosts: [
+    { unitId: 1, purchasePrice: 520000, monthlyPayment: 850, annualMembershipFees: 3000, annualAdditionalExpenses: 4500, updatedAt: "2026-07-19T12:00:00.000Z" },
+    { unitId: 2, purchasePrice: 470000, monthlyPayment: 750, annualMembershipFees: 3000, annualAdditionalExpenses: 0, updatedAt: "2026-07-19T12:00:00.000Z" },
+    { unitId: 3, purchasePrice: 980000, monthlyPayment: 1400, annualMembershipFees: 6000, annualAdditionalExpenses: 7500, updatedAt: "2026-07-19T12:00:00.000Z" },
+    { unitId: 4, purchasePrice: 1350000, monthlyPayment: 2200, annualMembershipFees: 9000, annualAdditionalExpenses: 68000, updatedAt: "2026-07-19T12:00:00.000Z" },
+    { unitId: 5, purchasePrice: 900000, monthlyPayment: 1300, annualMembershipFees: 6000, annualAdditionalExpenses: 0, updatedAt: "2026-07-19T12:00:00.000Z" },
+    { unitId: 6, purchasePrice: 540000, monthlyPayment: 850, annualMembershipFees: 3000, annualAdditionalExpenses: 2500, updatedAt: "2026-07-19T12:00:00.000Z" }
+  ],
+  unitStatusHistory: [
+    { id: 1, unitId: 1, status: "free", startDate: "2026-05-12", endDate: "2026-05-31" },
+    { id: 2, unitId: 1, status: "occupied", startDate: "2026-06-01", endDate: null },
+    { id: 3, unitId: 2, status: "free", startDate: "2026-04-01", endDate: null },
+    { id: 4, unitId: 3, status: "occupied", startDate: "2026-04-15", endDate: null },
+    { id: 5, unitId: 4, status: "maintenance", startDate: "2026-03-01", endDate: null },
+    { id: 6, unitId: 5, status: "free", startDate: "2026-06-10", endDate: null },
+    { id: 7, unitId: 6, status: "occupied", startDate: "2025-08-01", endDate: null }
+  ],
   locations: [
     { id: 1, name: "Северная, 12", address: "Санкт-Петербург, ул. Северная, 12", description: "Основной складской комплекс", isActive: true },
     { id: 2, name: "Промышленная, 7", address: "Санкт-Петербург, ул. Промышленная, 7", description: "Боксы и кладовки", isActive: true },

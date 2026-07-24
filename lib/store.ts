@@ -7,7 +7,12 @@ import type { AppData } from "./types";
 
 const STORAGE_KEY = "kladovaya-demo-v1";
 const cloneSeed = () => JSON.parse(JSON.stringify(seedData)) as AppData;
-const isStaticDemo = () => typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
+const isStaticDemo = () => {
+  if (typeof window === "undefined") return false;
+  return window.location.hostname.endsWith("github.io")
+    || window.location.hostname === "localhost"
+    || window.location.hostname === "127.0.0.1";
+};
 
 export function useAppStore() {
   const [data, setData] = useState<AppData>(cloneSeed);

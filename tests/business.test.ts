@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import QRCode from "qrcode";
-import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncMonthlyPaymentTasks, unitAnalytics, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
 import { findContractNumber, findPaymentPeriod } from "../lib/receipt-email";
@@ -45,6 +45,42 @@ test("dashboard исключает архивные юниты и считает
   assert.equal(metrics.occupiedUnits, 3);
   assert.equal(metrics.overdueChargesCount, 2);
   assert.equal(metrics.overdueAmount, 20500);
+});
+
+test("аналитика объекта считает доход, содержание, прибыль и доходность за 12 месяцев", () => {
+  const analytics = unitAnalytics(seedData, 1, new Date("2026-07-19T12:00:00"));
+  assert.equal(analytics.purchasePrice, 520000);
+  assert.equal(analytics.rentalIncome, 6500);
+  assert.equal(analytics.operatingCosts, 17700);
+  assert.equal(analytics.profit, -11200);
+  assert.equal(analytics.yieldPercent, 1.25);
+  assert.equal(analytics.idleDays, 20);
+});
+
+test("портфельная аналитика суммирует выбранные объекты", () => {
+  const analytics = portfolioAnalytics(seedData, [1, 3], new Date("2026-07-19T12:00:00"));
+  assert.equal(analytics.purchasePrice, 1500000);
+  assert.equal(analytics.rentalIncome, 20500);
+  assert.equal(analytics.operatingCosts, 48000);
+  assert.equal(analytics.profit, -27500);
+  assert.equal(analytics.yieldPercent, 1.3666666666666667);
+});
+
+test("смена статуса закрывает прошлый период и начинает новый", () => {
+  const changed = recordUnitStatusChange(seedData, 2, "maintenance", new Date("2026-07-20T12:00:00"));
+  const events = changed.unitStatusHistory!.filter((event) => event.unitId === 2);
+  assert.deepEqual(events, [
+    { id: 3, unitId: 2, status: "free", startDate: "2026-04-01", endDate: "2026-07-19" },
+    { id: 8, unitId: 2, status: "maintenance", startDate: "2026-07-20", endDate: null }
+  ]);
+});
+
+test("для существующего объекта без истории отсчёт простоя начинается с обновления", () => {
+  const data = structuredClone(seedData);
+  delete data.unitStatusHistory;
+  const initialized = ensureUnitStatusHistory(data, new Date("2026-07-24T12:00:00"));
+  assert.equal(initialized.unitStatusHistory?.length, data.units.length);
+  assert.equal(initialized.unitStatusHistory?.[0].startDate, "2026-07-24");
 });
 
 test("назначение QR содержит договор и оплачиваемый месяц", () => {

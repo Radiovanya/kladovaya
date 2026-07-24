@@ -1,27 +1,29 @@
 "use client";
 
 import {
-  Archive, Banknote, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
+  Archive, Banknote, BarChart3, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
   Copy, CreditCard, Download, ExternalLink, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, X
+  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, Wrench, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, syncMonthlyPaymentTasks, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncMonthlyPaymentTasks, unitOperatingCosts, unitStatus, validateActiveContract } from "@/lib/business";
 import { contractFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { useAppStore } from "@/lib/store";
 import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, Role, TaskStatus, UnitStatus } from "@/lib/types";
 
-type Page = "dashboard" | "locations" | "units" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
-type EntityType = Page | "documents";
+type Page = "dashboard" | "locations" | "units" | "unit-costs" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
+type RegistryPage = Exclude<Page, "dashboard" | "payment-settings" | "unit-costs">;
+type EntityType = RegistryPage | "documents";
 type Modal = null | { type: EntityType; id?: number };
 
 const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Обзор", icon: LayoutDashboard },
   { id: "locations", label: "Адреса", icon: MapPin },
   { id: "units", label: "Объекты", icon: Boxes },
+  { id: "unit-costs", label: "Содержание", icon: Wrench },
   { id: "customers", label: "Клиенты", icon: Users },
   { id: "contracts", label: "Договоры", icon: FileText },
   { id: "charges", label: "Начисления", icon: CircleDollarSign },
@@ -35,6 +37,7 @@ const titles: Record<Page, [string, string]> = {
   dashboard: ["Обзор", "Операционная картина на сегодня"],
   locations: ["Адреса", "Адреса и складские площадки"],
   units: ["Объекты", "Кладовки, гаражи и боксы"],
+  "unit-costs": ["Содержание", "Стоимость покупки и расходы по объектам"],
   customers: ["Клиенты", "Контактные данные арендаторов"],
   contracts: ["Договоры", "Условия и сроки аренды"],
   charges: ["Начисления", "Обязательства по договорам"],
@@ -137,7 +140,11 @@ export default function Home() {
     if (!window.confirm("Удалить запись без возможности восстановления?")) return;
     const next = structuredClone(data);
     if (type === "locations") next.locations = next.locations.filter((item) => item.id !== id);
-    if (type === "units") next.units = next.units.filter((item) => item.id !== id);
+    if (type === "units") {
+      next.units = next.units.filter((item) => item.id !== id);
+      next.unitOperatingCosts = next.unitOperatingCosts?.filter((item) => item.unitId !== id);
+      next.unitStatusHistory = next.unitStatusHistory?.filter((item) => item.unitId !== id);
+    }
     if (type === "customers") next.customers = next.customers.filter((item) => item.id !== id);
     if (type === "contracts") next.contracts = next.contracts.filter((item) => item.id !== id);
     if (type === "charges") next.charges = next.charges.filter((item) => item.id !== id);
@@ -201,7 +208,7 @@ export default function Home() {
           <button className="menu-button" onClick={() => setSidebar(true)} aria-label="Открыть меню"><Menu /></button>
           <div><h1>{customer ? customer.fullName : titles[page][0]}</h1><p>{customer ? customer.phone : titles[page][1]}</p></div>
           <div className="top-actions">
-            {page !== "dashboard" && page !== "payment-settings" && !customer && <button className="button primary" onClick={() => setModal({ type: page })}><Plus size={17} />Добавить</button>}
+            {!["dashboard", "payment-settings", "unit-costs"].includes(page) && !customer && <button className="button primary" onClick={() => setModal({ type: page as RegistryPage })}><Plus size={17} />Добавить</button>}
           </div>
         </header>
 
@@ -211,6 +218,8 @@ export default function Home() {
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
           <PaymentSettingsPage data={data} onSave={update} />
+        ) : page === "unit-costs" ? (
+          <UnitCostsPage data={data} onSave={update} />
         ) : (
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
@@ -236,7 +245,10 @@ function Login({ onLogin }: { onLogin: (user: { role: Role; name: string }) => P
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => setDemoMode(window.location.hostname.endsWith("github.io")), []);
+  useEffect(() => {
+    const host = window.location.hostname;
+    setDemoMode(host.endsWith("github.io") || host === "localhost" || host === "127.0.0.1");
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSubmitting(true);
@@ -274,6 +286,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
   data: AppData; locationFilter: string; setLocationFilter: (value: string) => void;
   onNavigate: (page: Page) => void; onCustomer: (id: number) => void;
 }) {
+  const [view, setView] = useState<"overview" | "analytics">("overview");
   const filtered = useMemo(() => {
     if (locationFilter === "all") return data;
     const locationId = Number(locationFilter);
@@ -287,43 +300,105 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
   const dueTasks = data.tasks.filter((task) => task.status !== "done").slice(0, 4);
   return (
     <>
-      <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
-      <section className="kpi-grid">
-        <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
-        <Kpi label="Свободно" value={String(metrics.freeUnits)} note={`${metrics.totalUnits ? Math.round(metrics.freeUnits / metrics.totalUnits * 100) : 0}% фонда`} />
-        <Kpi label="Занято" value={String(metrics.occupiedUnits)} note={`${metrics.totalUnits ? Math.round(metrics.occupiedUnits / metrics.totalUnits * 100) : 0}% фонда`} />
-        <Kpi label="Просрочено" value={money(metrics.overdueAmount)} note={`${metrics.overdueChargesCount} начисления`} tone="danger" />
-      </section>
-      <section className="dashboard-grid">
-        <div className="panel span-2">
-          <PanelHead title="Последние оплаты" action="Все оплаты" onClick={() => onNavigate("payments")} />
-          <table><thead><tr><th>Дата</th><th>Клиент</th><th>Способ</th><th className="number">Сумма</th></tr></thead>
-            <tbody>{recentPayments.map((payment) => {
-              const customer = data.customers.find((item) => item.id === payment.customerId);
-              return <tr key={payment.id} onClick={() => customer && onCustomer(customer.id)}><td>{date(payment.paymentDate)}</td><td><strong>{customer?.fullName}</strong></td><td>{methodName(payment.paymentMethod)}</td><td className="number"><strong>{money(payment.amount)}</strong></td></tr>;
-            })}</tbody>
-          </table>
-        </div>
-        <div className="panel">
-          <PanelHead title="Задачи" action="Все задачи" onClick={() => onNavigate("tasks")} />
-          <div className="task-list">{dueTasks.map((task) => <div className="task-item" key={task.id}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</div>)}</div>
-        </div>
-        <div className="panel span-2">
-          <PanelHead title="Договоры заканчиваются" action="Все договоры" onClick={() => onNavigate("contracts")} />
-          <table><tbody>{data.contracts.filter((contract) => contract.status === "active" && contract.endDate <= "2026-08-18").map((contract) => {
-            const customer = data.customers.find((item) => item.id === contract.customerId);
-            return <tr key={contract.id} onClick={() => customer && onCustomer(customer.id)}><td><strong>{contract.contractNumber}</strong><small className="cell-sub">{customer?.fullName}</small></td><td>{date(contract.endDate)}</td><td>{badge("active")}</td></tr>;
-          })}</tbody></table>
-        </div>
-        <div className="panel">
-          <PanelHead title="Заполняемость" />
-          <div className="occupancy-list">{data.locations.map((location) => {
-            const units = data.units.filter((unit) => unit.locationId === location.id && unit.status !== "archived");
-            const occupied = units.filter((unit) => unitStatus(unit.id, data) === "occupied").length;
-            return <div key={location.id}><span><strong>{location.name}</strong><small>{occupied} / {units.length}</small></span><div className="progress"><i style={{ width: `${units.length ? occupied / units.length * 100 : 0}%` }} /></div></div>;
-          })}</div>
-        </div>
-      </section>
+      <div className="dashboard-tabs">
+        <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><LayoutDashboard size={16} />Обзор</button>
+        <button className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><BarChart3 size={16} />Аналитика</button>
+      </div>
+      {view === "analytics" ? <AnalyticsDashboard data={data} /> : <>
+        <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
+        <section className="kpi-grid">
+          <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
+          <Kpi label="Свободно" value={String(metrics.freeUnits)} note={`${metrics.totalUnits ? Math.round(metrics.freeUnits / metrics.totalUnits * 100) : 0}% фонда`} />
+          <Kpi label="Занято" value={String(metrics.occupiedUnits)} note={`${metrics.totalUnits ? Math.round(metrics.occupiedUnits / metrics.totalUnits * 100) : 0}% фонда`} />
+          <Kpi label="Просрочено" value={money(metrics.overdueAmount)} note={`${metrics.overdueChargesCount} начисления`} tone="danger" />
+        </section>
+        <section className="dashboard-grid">
+          <div className="panel span-2">
+            <PanelHead title="Последние оплаты" action="Все оплаты" onClick={() => onNavigate("payments")} />
+            <table><thead><tr><th>Дата</th><th>Клиент</th><th>Способ</th><th className="number">Сумма</th></tr></thead>
+              <tbody>{recentPayments.map((payment) => {
+                const customer = data.customers.find((item) => item.id === payment.customerId);
+                return <tr key={payment.id} onClick={() => customer && onCustomer(customer.id)}><td>{date(payment.paymentDate)}</td><td><strong>{customer?.fullName}</strong></td><td>{methodName(payment.paymentMethod)}</td><td className="number"><strong>{money(payment.amount)}</strong></td></tr>;
+              })}</tbody>
+            </table>
+          </div>
+          <div className="panel">
+            <PanelHead title="Задачи" action="Все задачи" onClick={() => onNavigate("tasks")} />
+            <div className="task-list">{dueTasks.map((task) => <div className="task-item" key={task.id}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</div>)}</div>
+          </div>
+          <div className="panel span-2">
+            <PanelHead title="Договоры заканчиваются" action="Все договоры" onClick={() => onNavigate("contracts")} />
+            <table><tbody>{data.contracts.filter((contract) => contract.status === "active" && contract.endDate <= "2026-08-18").map((contract) => {
+              const customer = data.customers.find((item) => item.id === contract.customerId);
+              return <tr key={contract.id} onClick={() => customer && onCustomer(customer.id)}><td><strong>{contract.contractNumber}</strong><small className="cell-sub">{customer?.fullName}</small></td><td>{date(contract.endDate)}</td><td>{badge("active")}</td></tr>;
+            })}</tbody></table>
+          </div>
+          <div className="panel">
+            <PanelHead title="Заполняемость" />
+            <div className="occupancy-list">{data.locations.map((location) => {
+              const units = data.units.filter((unit) => unit.locationId === location.id && unit.status !== "archived");
+              const occupied = units.filter((unit) => unitStatus(unit.id, data) === "occupied").length;
+              return <div key={location.id}><span><strong>{location.name}</strong><small>{occupied} / {units.length}</small></span><div className="progress"><i style={{ width: `${units.length ? occupied / units.length * 100 : 0}%` }} /></div></div>;
+            })}</div>
+          </div>
+        </section>
+      </>}
+    </>
+  );
+}
+
+function AnalyticsDashboard({ data }: { data: AppData }) {
+  const [locationId, setLocationId] = useState(String(data.locations[0]?.id ?? ""));
+  const [unitId, setUnitId] = useState("all");
+  const units = data.units.filter((unit) => String(unit.locationId) === locationId && unit.status !== "archived");
+  useEffect(() => {
+    if (unitId !== "all" && !units.some((unit) => String(unit.id) === unitId)) setUnitId("all");
+  }, [unitId, units]);
+  const selectedIds = unitId === "all" ? units.map((unit) => unit.id) : [Number(unitId)];
+  const analytics = portfolioAnalytics(data, selectedIds, new Date());
+  const selectedUnit = unitId === "all" ? null : data.units.find((unit) => unit.id === Number(unitId));
+  const costs = selectedIds.map((id) => unitOperatingCosts(data, id));
+  const annualMonthlyPayments = costs.reduce((sum, item) => sum + item.monthlyPayment * 12, 0);
+  const membershipFees = costs.reduce((sum, item) => sum + item.annualMembershipFees, 0);
+  const additionalExpenses = costs.reduce((sum, item) => sum + item.annualAdditionalExpenses, 0);
+  const maxBreakdown = Math.max(1, annualMonthlyPayments, membershipFees, additionalExpenses);
+  return (
+    <>
+      <div className="analytics-filters">
+        <label>Адрес<select value={locationId} onChange={(event) => { setLocationId(event.target.value); setUnitId("all"); }}>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+        <label>Объект<select value={unitId} onChange={(event) => setUnitId(event.target.value)}><option value="all">Все объекты по адресу</option>{units.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber} · {unitTypeName(unit.unitType)}</option>)}</select></label>
+      </div>
+      {!selectedIds.length ? <div className="empty panel">По выбранному адресу нет объектов</div> : <>
+        <section className="analytics-kpi-grid">
+          <Kpi label="Стоимость покупки" value={money(analytics.purchasePrice)} note={selectedUnit ? `Объект № ${selectedUnit.unitNumber}` : `${selectedIds.length} объектов`} />
+          <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note="Фактические оплаты за 12 месяцев" />
+          <Kpi label="Затраты на содержание" value={money(analytics.operatingCosts)} note="Годовая сумма расходов" />
+          <Kpi label="Прибыль" value={money(analytics.profit)} note="Доход минус содержание" tone={analytics.profit < 0 ? "danger" : "positive"} />
+          <Kpi label="Доходность аренды" value={`${analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%`} note="Годовой доход / стоимость × 100%" />
+          <Kpi label="Простой" value={`${analytics.idleDays} дн.`} note={analytics.trackingSince ? `Учёт с ${date(analytics.trackingSince)}` : "История статусов ещё не накоплена"} />
+        </section>
+        <section className="analytics-grid">
+          <div className="panel">
+            <PanelHead title="Структура затрат за 12 месяцев" />
+            <div className="expense-breakdown">
+              {[
+                ["Оплата в месяц × 12", annualMonthlyPayments],
+                ["Членские взносы", membershipFees],
+                ["Дополнительные расходы", additionalExpenses]
+              ].map(([label, value]) => <div key={String(label)}><span><strong>{label}</strong><small>{money(Number(value))}</small></span><div className="progress"><i style={{ width: `${Number(value) / maxBreakdown * 100}%` }} /></div></div>)}
+            </div>
+          </div>
+          <div className="panel analytics-method">
+            <PanelHead title="Как рассчитано" />
+            <dl>
+              <div><dt>Доход</dt><dd>Фактические оплаты аренды за последние 12 месяцев.</dd></div>
+              <div><dt>Содержание</dt><dd>12 ежемесячных оплат + годовые членские взносы + дополнительные расходы.</dd></div>
+              <div><dt>Простой</dt><dd>Дни, когда объект был свободен или находился в ремонте.</dd></div>
+              <div><dt>Доходность</dt><dd>(Доход от аренды / стоимость покупки) × 100%.</dd></div>
+            </dl>
+          </div>
+        </section>
+      </>}
     </>
   );
 }
@@ -335,8 +410,72 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
 }
 
+function UnitCostsPage({ data, onSave }: { data: AppData; onSave: (data: AppData, message: string) => void }) {
+  const [selectedId, setSelectedId] = useState(data.units[0]?.id ?? 0);
+  const selected = data.units.find((unit) => unit.id === selectedId) ?? data.units[0];
+  if (!selected) return <div className="empty panel">Сначала добавьте объект</div>;
+  const costs = unitOperatingCosts(data, selected.id);
+  const location = data.locations.find((item) => item.id === selected.locationId);
+  const annualCosts = costs.monthlyPayment * 12 + costs.annualMembershipFees + costs.annualAdditionalExpenses;
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const amount = (name: string) => Math.max(0, Number(form.get(name) ?? 0) || 0);
+    const next = structuredClone(data);
+    next.unitOperatingCosts ??= [];
+    const record = {
+      unitId: selected.id,
+      purchasePrice: amount("purchasePrice"),
+      monthlyPayment: amount("monthlyPayment"),
+      annualMembershipFees: amount("annualMembershipFees"),
+      annualAdditionalExpenses: amount("annualAdditionalExpenses"),
+      updatedAt: new Date().toISOString()
+    };
+    const index = next.unitOperatingCosts.findIndex((item) => item.unitId === selected.id);
+    if (index >= 0) next.unitOperatingCosts[index] = record; else next.unitOperatingCosts.push(record);
+    onSave(next, `Расходы объекта № ${selected.unitNumber} сохранены`);
+  }
+
+  return (
+    <section className="unit-costs-layout">
+      <aside className="unit-costs-list">
+        <div className="unit-costs-list-head"><strong>Все объекты</strong><span>{data.units.length}</span></div>
+        {data.units.map((unit) => {
+          const unitLocation = data.locations.find((item) => item.id === unit.locationId);
+          const unitCosts = unitOperatingCosts(data, unit.id);
+          return <button type="button" className={unit.id === selected.id ? "active" : ""} onClick={() => setSelectedId(unit.id)} key={unit.id}>
+            <span><strong>№ {unit.unitNumber}</strong>{badge(unit.status)}</span>
+            <small>{unitLocation?.name ?? "Адрес не указан"} · {unitTypeName(unit.unitType)}</small>
+            <em>{unitCosts.purchasePrice ? money(unitCosts.purchasePrice) : "Стоимость не заполнена"}</em>
+          </button>;
+        })}
+      </aside>
+      <form className="panel unit-costs-detail" onSubmit={submit} key={selected.id}>
+        <header>
+          <div><span>Объект</span><h2>№ {selected.unitNumber}</h2><p>{location?.address ?? "Адрес не указан"} · {unitTypeName(selected.unitType)} · {selected.areaSqm} м²</p></div>
+          {badge(selected.status)}
+        </header>
+        <div className="unit-costs-summary">
+          <span><small>Арендная ставка</small><strong>{money(selected.monthlyRate)} / мес.</strong></span>
+          <span><small>Содержание за год</small><strong>{money(annualCosts)}</strong></span>
+          <span><small>Обновлено</small><strong>{costs.updatedAt ? date(costs.updatedAt) : "Не заполнено"}</strong></span>
+        </div>
+        <div className="form-grid unit-cost-fields">
+          <label>Стоимость покупки, ₽<input name="purchasePrice" type="number" min="0" step="0.01" defaultValue={costs.purchasePrice || ""} /></label>
+          <label>Оплата в месяц, ₽<input name="monthlyPayment" type="number" min="0" step="0.01" defaultValue={costs.monthlyPayment || ""} /></label>
+          <label>Членские взносы за год, ₽<input name="annualMembershipFees" type="number" min="0" step="0.01" defaultValue={costs.annualMembershipFees || ""} /></label>
+          <label>Доп. расходы за год, ₽<input name="annualAdditionalExpenses" type="number" min="0" step="0.01" defaultValue={costs.annualAdditionalExpenses || ""} /></label>
+        </div>
+        <div className="unit-costs-note">Эти данные используются во вкладке «Обзор → Аналитика». Годовые затраты = оплата в месяц × 12 + членские взносы + дополнительные расходы.</div>
+        <div className="modal-actions"><button className="button primary"><Save size={16} />Сохранить</button></div>
+      </form>
+    </section>
+  );
+}
+
 function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onPayment, onCopyPhoto }: {
-  page: Page; data: AppData; search: string; setSearch: (value: string) => void;
+  page: RegistryPage; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
   onTaskStatus: (id: number, status: TaskStatus) => void;
@@ -1047,14 +1186,17 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
     event.preventDefault(); setError("");
     const form = new FormData(event.currentTarget);
     try {
-      const next = structuredClone(data);
+      let next = structuredClone(data);
       if (modal.type === "locations") upsert(next.locations, { id: modal.id ?? nextId(next.locations), name: input(form, "name"), address: input(form, "address"), description: input(form, "description"), isActive: editing?.isActive !== false });
       else if (modal.type === "units") {
         const locationId = Number(input(form, "locationId"));
         const unitNumber = input(form, "unitNumber");
         const duplicate = next.units.some((unit) => unit.id !== modal.id && unit.locationId === locationId && unit.unitNumber.toLocaleLowerCase("ru") === unitNumber.toLocaleLowerCase("ru"));
         if (duplicate) throw new Error("Объект с таким номером уже существует по выбранному адресу");
-        upsert(next.units, { id: modal.id ?? nextId(next.units), locationId, unitNumber, unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status: input(form, "status") as UnitStatus, note: input(form, "note"), photoUrl: normalizeObjectPhotoUrl(input(form, "photoUrl")) });
+        const unitId = modal.id ?? nextId(next.units);
+        const status = input(form, "status") as UnitStatus;
+        upsert(next.units, { id: unitId, locationId, unitNumber, unitType: input(form, "unitType") as "storage", areaSqm: Number(input(form, "areaSqm")), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), status, note: input(form, "note"), photoUrl: normalizeObjectPhotoUrl(input(form, "photoUrl")) });
+        next = recordUnitStatusChange(next, unitId, status, new Date());
       }
       else if (modal.type === "customers") upsert(next.customers, { id: modal.id ?? nextId(next.customers), customerType: (editing?.customerType as "individual" | "business" | undefined) ?? "individual", fullName: input(form, "fullName"), phone: input(form, "phone"), email: input(form, "email"), passportOrRegistrationData: input(form, "registration"), taxId: input(form, "taxId"), address: input(form, "address"), note: input(form, "note") });
       else if (modal.type === "contracts") {

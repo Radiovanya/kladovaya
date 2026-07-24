@@ -13,6 +13,21 @@ export interface Unit {
   areaSqm: number; monthlyRate: number; depositAmount: number; status: UnitStatus; note: string;
   photoUrl?: string;
 }
+export interface UnitOperatingCosts {
+  unitId: number;
+  purchasePrice: number;
+  monthlyPayment: number;
+  annualMembershipFees: number;
+  annualAdditionalExpenses: number;
+  updatedAt: string;
+}
+export interface UnitStatusEvent {
+  id: number;
+  unitId: number;
+  status: UnitStatus;
+  startDate: string;
+  endDate: string | null;
+}
 export interface Customer {
   id: number; customerType: "individual" | "business"; fullName: string; phone: string;
   email: string; passportOrRegistrationData: string; taxId: string; address: string; note: string;
@@ -67,4 +82,6 @@ export interface AppData {
   paymentSettings?: PaymentSettings;
   landlordSettings?: LandlordSettings;
   paymentRequests?: PaymentRequest[];
+  unitOperatingCosts?: UnitOperatingCosts[];
+  unitStatusHistory?: UnitStatusEvent[];
 }
