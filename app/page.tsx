@@ -1202,7 +1202,10 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
       else if (modal.type === "contracts") {
         const candidate: Contract = { id: modal.id ?? nextId(next.contracts), customerId: Number(input(form, "customerId")), unitId: Number(input(form, "unitId")), contractNumber: input(form, "contractNumber"), startDate: input(form, "startDate"), endDate: input(form, "endDate"), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), billingDay: Number(input(form, "billingDay")), status: input(form, "status") as "active", terminationReason: value("terminationReason"), note: input(form, "note") };
         validateActiveContract(candidate, next.contracts); upsert(next.contracts, candidate);
-        if (candidate.status === "active") next.units.find((unit) => unit.id === candidate.unitId)!.status = "occupied";
+        if (candidate.status === "active") {
+          next.units.find((unit) => unit.id === candidate.unitId)!.status = "occupied";
+          next = recordUnitStatusChange(next, candidate.unitId, "occupied", new Date(`${candidate.startDate}T12:00:00`));
+        }
       } else if (modal.type === "charges") upsert(next.charges, { id: modal.id ?? nextId(next.charges), contractId: Number(input(form, "contractId")), periodStart: input(form, "periodStart"), periodEnd: input(form, "periodEnd"), dueDate: input(form, "dueDate"), amount: Number(input(form, "amount")), chargeType: input(form, "chargeType") as "rent", status: (editing?.status as "pending" | undefined) ?? "pending", note: input(form, "note") });
       else if (modal.type === "payments") {
         const chargeId = input(form, "chargeId");

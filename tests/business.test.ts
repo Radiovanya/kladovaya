@@ -80,7 +80,29 @@ test("для существующего объекта без истории о�
   delete data.unitStatusHistory;
   const initialized = ensureUnitStatusHistory(data, new Date("2026-07-24T12:00:00"));
   assert.equal(initialized.unitStatusHistory?.length, data.units.length);
-  assert.equal(initialized.unitStatusHistory?.[0].startDate, "2026-07-24");
+  assert.equal(initialized.unitStatusHistory?.find((event) => event.unitId === 1)?.startDate, "2026-06-01");
+  assert.equal(initialized.unitStatusHistory?.find((event) => event.unitId === 2)?.startDate, "2026-07-24");
+});
+
+test("занятый объект не получает фиктивный простой, а внесённая оплата с завтрашней датой входит в доход", () => {
+  const data = structuredClone(seedData);
+  data.locations = [{ id: 1, name: "АВТОВИТА", address: "Тольятти", description: "", isActive: true }];
+  data.units = [{ id: 1, locationId: 1, unitNumber: "71", unitType: "storage", areaSqm: 5, monthlyRate: 2000, depositAmount: 0, status: "occupied", note: "" }];
+  data.contracts = [{ id: 1, customerId: 1, unitId: 1, contractNumber: "Д-2026-001", startDate: "2026-07-15", endDate: "2026-09-15", monthlyRate: 2000, depositAmount: 0, billingDay: 15, status: "active", terminationReason: "", note: "" }];
+  data.charges = [{ id: 1, contractId: 1, periodStart: "2026-07-15", periodEnd: "2026-09-15", dueDate: "2026-07-15", amount: 6000, chargeType: "rent", status: "paid", note: "" }];
+  data.payments = [{ id: 1, customerId: 1, contractId: 1, chargeId: 1, paymentDate: "2026-07-28", amount: 6000, paymentMethod: "bank_transfer", referenceNumber: "ПП-1", comment: "" }];
+  data.unitOperatingCosts = [{ unitId: 1, purchasePrice: 46000, monthlyPayment: 150, annualMembershipFees: 0, annualAdditionalExpenses: 0, updatedAt: "2026-07-27" }];
+  data.unitStatusHistory = [{ id: 1, unitId: 1, status: "free", startDate: "2026-07-27", endDate: null }];
+
+  const reconciled = ensureUnitStatusHistory(data, new Date("2026-07-27T12:00:00"));
+  assert.deepEqual(reconciled.unitStatusHistory, [
+    { id: 1, unitId: 1, status: "occupied", startDate: "2026-07-15", endDate: null }
+  ]);
+  const analytics = unitAnalytics(reconciled, 1, new Date("2026-07-27T12:00:00"));
+  assert.equal(analytics.rentalIncome, 6000);
+  assert.equal(analytics.idleDays, 0);
+  assert.equal(analytics.profit, 4200);
+  assert.equal(analytics.yieldPercent, 6000 / 46000 * 100);
 });
 
 test("назначение QR содержит договор и оплачиваемый месяц", () => {

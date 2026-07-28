@@ -82,13 +82,32 @@ export function ensureUnitStatusHistory(data: AppData, now = new Date()) {
   let nextEventId = Math.max(0, ...next.unitStatusHistory.map((event) => event.id)) + 1;
   const today = isoDate(now);
   for (const unit of next.units) {
-    const hasOpenEvent = next.unitStatusHistory.some((event) => event.unitId === unit.id && event.endDate === null);
-    if (!hasOpenEvent) {
+    const unitEvents = next.unitStatusHistory.filter((event) => event.unitId === unit.id);
+    const openEvent = [...unitEvents].reverse().find((event) => event.endDate === null);
+    const activeContract = unit.status === "occupied"
+      ? next.contracts
+        .filter((contract) => contract.unitId === unit.id && contract.status === "active")
+        .sort((left, right) => left.startDate.localeCompare(right.startDate))[0]
+      : undefined;
+    const inferredStartDate = activeContract?.startDate ?? today;
+
+    if (
+      openEvent &&
+      openEvent.status !== unit.status &&
+      unit.status === "occupied" &&
+      activeContract &&
+      activeContract.startDate <= openEvent.startDate
+    ) {
+      openEvent.status = "occupied";
+      openEvent.startDate = activeContract.startDate;
+      continue;
+    }
+    if (!openEvent) {
       next.unitStatusHistory.push({
         id: nextEventId++,
         unitId: unit.id,
         status: unit.status,
-        startDate: today,
+        startDate: inferredStartDate,
         endDate: null
       });
     }
@@ -102,8 +121,9 @@ export function recordUnitStatusChange(data: AppData, unitId: number, status: Un
   const events = next.unitStatusHistory!;
   const openEvent = [...events].reverse().find((event) => event.unitId === unitId && event.endDate === null);
   if (openEvent?.status === status) return next;
-  if (openEvent?.startDate === today) {
+  if (openEvent && today <= openEvent.startDate) {
     openEvent.status = status;
+    openEvent.startDate = today;
     return next;
   }
   if (openEvent) {
@@ -155,7 +175,7 @@ export function unitAnalytics(data: AppData, unitId: number, now = new Date()): 
   const endDate = isoDate(now);
   const rentalIncome = data.payments
     .filter((payment) => {
-      if (!contractIds.includes(payment.contractId) || payment.paymentDate < startDate || payment.paymentDate > endDate) return false;
+      if (!contractIds.includes(payment.contractId) || payment.paymentDate < startDate) return false;
       const charge = payment.chargeId ? data.charges.find((item) => item.id === payment.chargeId) : undefined;
       return !charge || charge.chargeType === "rent";
     })
