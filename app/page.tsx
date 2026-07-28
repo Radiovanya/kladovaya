@@ -8,7 +8,7 @@ import {
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncMonthlyPaymentTasks, unitOperatingCosts, unitStatus, validateActiveContract } from "@/lib/business";
-import { contractFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
+import { contractPdfFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { useAppStore } from "@/lib/store";
@@ -909,6 +909,7 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [landlordType, setLandlordType] = useState<LandlordType>("entrepreneur");
 
   useEffect(() => {
@@ -926,17 +927,35 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
     return () => controller.abort();
   }, [contractId, data, landlordType]);
 
-  function download() {
-    const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = contractFileName(contract.contractNumber);
-    anchor.click();
-    URL.revokeObjectURL(url);
+  async function downloadPdf() {
+    setDownloadingPdf(true); setError("");
+    try {
+      const response = await fetch("/api/contracts/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractNumber: contract.contractNumber, content })
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error ?? "Не удалось сформировать PDF");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = contractPdfFileName(contract.contractNumber);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось скачать PDF");
+    } finally {
+      setDownloadingPdf(false);
+    }
   }
 
   function print() {
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    const printWindow = window.open("", "_blank");
     if (!printWindow) { setError("Браузер заблокировал окно печати"); return; }
     printWindow.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${escapeHtml(contract.contractNumber)}</title><style>body{font-family:Arial,sans-serif;color:#111;max-width:820px;margin:36px auto;line-height:1.45;font-size:12px}h1{text-align:center;font-size:22px;margin:0 0 24px}h2{font-size:16px;margin:24px 0 10px;page-break-after:avoid}h3{font-size:14px;margin:18px 0 8px}p{margin:6px 0}ul{margin:7px 0 12px;padding-left:24px}hr{border:0;border-top:1px solid #bbb;margin:28px 0}@page{size:A4;margin:18mm}@media print{body{margin:0;max-width:none}}</style></head><body>${markdownToHtml(content)}</body></html>`);
     printWindow.document.close();
@@ -982,9 +1001,9 @@ function ContractDocumentModal({ contractId, data, onClose }: { contractId: numb
         {content && <article className="contract-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }} />}
         <div className="modal-actions contract-actions">
           <button className="button" onClick={copy} disabled={!content}><Copy size={16} />{copied ? "Скопировано" : "Копировать"}</button>
-          <button className="button" onClick={download} disabled={!content}><Download size={16} />Скачать Markdown</button>
+          <button className="button" onClick={downloadPdf} disabled={!content || downloadingPdf}><Download size={16} />{downloadingPdf ? "Формируем PDF…" : "Скачать PDF"}</button>
           <button className="button" onClick={send} disabled={!content || !customer.email || sending}><Mail size={16} />{sending ? "Отправляем…" : sent ? "Отправлен" : "Отправить клиенту"}</button>
-          <button className="button primary" onClick={print} disabled={!content}><Printer size={16} />Печать / PDF</button>
+          <button className="button primary" onClick={print} disabled={!content}><Printer size={16} />Распечатать</button>
         </div>
       </section>
     </div>

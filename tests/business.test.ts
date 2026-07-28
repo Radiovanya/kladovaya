@@ -273,7 +273,7 @@ test("скан договора связывается с договором и 
   const data = structuredClone(seedData);
   data.documents = [];
   assert.deepEqual(eligibleContractsForScan(data, 1).map((contract) => contract.id), [1]);
-  data.documents.push({ id: 100, entityType: "contract", entityId: 1, fileName: "signed.pdf", fileUrl: "indexeddb:100", documentType: "contract_scan" });
+  data.documents.push({ id: 100, entityType: "contract", entityId: 1, fileName: "signed.pdf", fileUrl: "/api/documents?key=contracts%2F1%2Fsigned.pdf", documentType: "contract_scan" });
   assert.equal(customerContractScans(data, 1).length, 1);
   assert.equal(eligibleContractsForScan(data, 1).length, 0);
   assert.throws(() => validateSignedContractUpload(data, 1, 1), /уже загружена/);

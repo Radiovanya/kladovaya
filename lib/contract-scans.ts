@@ -5,7 +5,11 @@ export const MAX_SIGNED_CONTRACTS_PER_CUSTOMER = 3;
 export function isStoredContractScan(document: DocumentItem) {
   return document.entityType === "contract" &&
     document.documentType === "contract_scan" &&
-    (document.fileUrl.startsWith("indexeddb:") || document.fileUrl.startsWith("https://"));
+    (
+      document.fileUrl.startsWith("indexeddb:") ||
+      document.fileUrl.startsWith("https://") ||
+      document.fileUrl.startsWith("/api/documents")
+    );
 }
 
 export function customerContractScans(data: AppData, customerId: number) {

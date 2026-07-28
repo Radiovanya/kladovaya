@@ -112,3 +112,7 @@ export function generateRentalContract(template: string, data: AppData, contract
 export function contractFileName(contractNumber: string) {
   return `dogovor-${contractNumber.replace(/[^a-zA-Zа-яА-Я0-9-]+/g, "-")}.md`;
 }
+
+export function contractPdfFileName(contractNumber: string) {
+  return contractFileName(contractNumber).replace(/\.md$/, ".pdf");
+}
