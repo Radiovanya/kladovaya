@@ -64,6 +64,7 @@ input[readonly] { background: var(--surface-soft); color: #4f555d; cursor: defau
 .analytics-filters { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
 .analytics-filters label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
 .analytics-filters select { min-width: 240px; }
+.analytics-scope { margin: -2px 0 12px; color: var(--muted); font-size: 12px; }
 .analytics-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .analytics-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
 .expense-breakdown { display: grid; gap: 18px; padding: 5px 0 3px; }

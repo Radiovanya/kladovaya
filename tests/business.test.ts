@@ -105,6 +105,33 @@ test("занятый объект не получает фиктивный пр�
   assert.equal(analytics.yieldPercent, 6000 / 46000 * 100);
 });
 
+test("аналитика отдельной кладовой не включает расходы и простой соседнего объекта", () => {
+  const data = structuredClone(seedData);
+  data.units = [
+    { id: 2, locationId: 2, unitNumber: "182", unitType: "storage", areaSqm: 3, monthlyRate: 2000, depositAmount: 0, status: "free", note: "" },
+    { id: 3, locationId: 2, unitNumber: "46", unitType: "storage", areaSqm: 3, monthlyRate: 2000, depositAmount: 0, status: "occupied", note: "" }
+  ];
+  data.unitOperatingCosts = [
+    { unitId: 2, purchasePrice: 20000, monthlyPayment: 150, annualMembershipFees: 0, annualAdditionalExpenses: 500, updatedAt: "2026-07-28" },
+    { unitId: 3, purchasePrice: 25000, monthlyPayment: 150, annualMembershipFees: 500, annualAdditionalExpenses: 0, updatedAt: "2026-07-28" }
+  ];
+  data.unitStatusHistory = [
+    { id: 2, unitId: 2, status: "free", startDate: "2026-07-28", endDate: null },
+    { id: 3, unitId: 3, status: "occupied", startDate: "2026-04-06", endDate: null }
+  ];
+  data.contracts = [];
+  data.payments = [];
+  data.charges = [];
+
+  const unit = unitAnalytics(data, 3, new Date("2026-07-28T12:00:00"));
+  assert.equal(unit.operatingCosts, 2300);
+  assert.equal(unit.idleDays, 0);
+
+  const address = portfolioAnalytics(data, [2, 3], new Date("2026-07-28T12:00:00"));
+  assert.equal(address.operatingCosts, 4600);
+  assert.equal(address.idleDays, 1);
+});
+
 test("назначение QR содержит договор и оплачиваемый месяц", () => {
   assert.equal(paymentPurpose("Д-2026-014", "2026-08"), "Аренда Д-2026-014 08.2026, без НДС");
 });

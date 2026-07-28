@@ -349,7 +349,10 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
 
 function AnalyticsDashboard({ data }: { data: AppData }) {
   const [locationId, setLocationId] = useState(String(data.locations[0]?.id ?? ""));
-  const [unitId, setUnitId] = useState("all");
+  const [unitId, setUnitId] = useState(() => {
+    const firstLocationId = data.locations[0]?.id;
+    return String(data.units.find((unit) => unit.locationId === firstLocationId && unit.status !== "archived")?.id ?? "all");
+  });
   const units = data.units.filter((unit) => String(unit.locationId) === locationId && unit.status !== "archived");
   useEffect(() => {
     if (unitId !== "all" && !units.some((unit) => String(unit.id) === unitId)) setUnitId("all");
@@ -365,10 +368,20 @@ function AnalyticsDashboard({ data }: { data: AppData }) {
   return (
     <>
       <div className="analytics-filters">
-        <label>Адрес<select value={locationId} onChange={(event) => { setLocationId(event.target.value); setUnitId("all"); }}>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
-        <label>Объект<select value={unitId} onChange={(event) => setUnitId(event.target.value)}><option value="all">Все объекты по адресу</option>{units.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber} · {unitTypeName(unit.unitType)}</option>)}</select></label>
+        <label>Адрес<select value={locationId} onChange={(event) => {
+          const nextLocationId = event.target.value;
+          const firstUnit = data.units.find((unit) => String(unit.locationId) === nextLocationId && unit.status !== "archived");
+          setLocationId(nextLocationId);
+          setUnitId(firstUnit ? String(firstUnit.id) : "all");
+        }}>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+        <label>Объект<select value={unitId} onChange={(event) => setUnitId(event.target.value)}>{units.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber} · {unitTypeName(unit.unitType)}</option>)}<option value="all">Итого по всем объектам адреса</option></select></label>
       </div>
       {!selectedIds.length ? <div className="empty panel">По выбранному адресу нет объектов</div> : <>
+        <p className="analytics-scope">
+          {selectedUnit
+            ? `Показатели только по объекту № ${selectedUnit.unitNumber}.`
+            : `Сводные показатели по всем объектам адреса: ${selectedIds.length} шт.`}
+        </p>
         <section className="analytics-kpi-grid">
           <Kpi label="Стоимость покупки" value={money(analytics.purchasePrice)} note={selectedUnit ? `Объект № ${selectedUnit.unitNumber}` : `${selectedIds.length} объектов`} />
           <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note="Фактические оплаты за 12 месяцев" />
