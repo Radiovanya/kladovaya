@@ -95,6 +95,41 @@ export interface TelegramNotification {
   contractId: number; period: string; kind: "advance" | "due";
   sentAt: string;
 }
+export interface PurchaseBuyer {
+  id: number;
+  label: string;
+  fullName: string;
+  passport: string;
+  issuedBy: string;
+  issueDate: string;
+  departmentCode: string;
+  registrationAddress: string;
+  phone: string;
+  email: string;
+}
+export interface PurchaseSeller {
+  fullName: string;
+  passport: string;
+  issuedBy: string;
+  issueDate: string;
+  departmentCode: string;
+  registrationAddress: string;
+  phone: string;
+  email: string;
+}
+export interface PurchaseDeal {
+  id: number;
+  unitId: number;
+  buyerId: number;
+  seller: PurchaseSeller;
+  dealDate: string;
+  price: number;
+  contractNumber: string;
+  paymentTerms: string;
+  additionalTerms: string;
+  generatedDocument: string;
+  createdAt: string;
+}
 export interface AppData {
   locations: Location[]; units: Unit[]; customers: Customer[]; contracts: Contract[];
   charges: Charge[]; payments: Payment[]; tasks: Task[]; documents: DocumentItem[]; users: User[];
@@ -108,4 +143,6 @@ export interface AppData {
   telegramInvites?: TelegramInvite[];
   telegramPendingReceipts?: TelegramPendingReceipt[];
   telegramNotifications?: TelegramNotification[];
+  purchaseBuyers?: PurchaseBuyer[];
+  purchaseDeals?: PurchaseDeal[];
 }

@@ -182,6 +182,20 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .save-error { background: #8d2d26; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .settings-layout { display: grid; grid-template-columns: 1.35fr .9fr; gap: 16px; align-items: flex-start; }
+.purchase-page { display: grid; gap: 16px; }
+.section-tabs { width: fit-content; display: flex; gap: 5px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.section-tabs button { min-height: 38px; border: 0; border-radius: 7px; padding: 8px 13px; display: inline-flex; align-items: center; gap: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+.section-tabs button.active { background: var(--primary); color: #fff; }
+.purchase-contract-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.purchase-panel { padding: 18px; display: grid; gap: 16px; }
+.purchase-panel .panel-head small { color: var(--muted); font-size: 9px; }
+.buyer-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.buyer-picker button { min-width: 0; border: 1px solid var(--border); border-radius: 9px; padding: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; background: var(--surface-soft); text-align: left; cursor: pointer; }
+.buyer-picker button.active { border-color: #91a691; background: var(--accent); }
+.buyer-picker span { min-width: 0; display: grid; gap: 3px; }
+.buyer-picker strong, .buyer-picker small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.buyer-picker strong { font-size: 10px; color: var(--text); }
+.buyer-picker small { font-size: 9px; color: var(--muted); }
 .settings-panel { min-width: 0; }
 .settings-panel .form-grid { margin-top: 18px; }
 .settings-note { color: var(--muted); font-size: 11px; line-height: 1.55; margin: 0; }
@@ -308,6 +322,10 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid label.wide { grid-column: auto; }
   .settings-layout, .qr-layout { grid-template-columns: 1fr; }
+  .purchase-contract-layout { grid-template-columns: 1fr; }
+  .buyer-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .section-tabs { width: 100%; overflow-x: auto; }
+  .section-tabs button { flex: 1 0 auto; }
   .settings-actions { grid-column: auto; }
   .qr-image { min-height: 270px; }
   .qr-summary { grid-template-columns: 1fr; }

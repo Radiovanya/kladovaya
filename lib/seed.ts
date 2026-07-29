@@ -1,6 +1,8 @@
 import type { AppData } from "./types";
 
 export const seedData: AppData = {
+  purchaseBuyers: [],
+  purchaseDeals: [],
   paymentSettings: {
     bankName: "Т-Банк",
     recipientName: "",

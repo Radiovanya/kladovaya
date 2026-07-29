@@ -3,7 +3,7 @@
 import {
   Archive, Banknote, BarChart3, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
   Copy, CreditCard, Download, ExternalLink, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, MessageCircle, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, Wrench, X
+  Menu, MessageCircle, Pencil, Plus, Printer, QrCode, Save, Search, Settings, ShoppingCart, Trash2, Upload, UserRound, Users, Warehouse, Wrench, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
@@ -11,11 +11,12 @@ import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboa
 import { contractPdfFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
+import { generatePurchaseContract, nextPurchaseContractNumber } from "@/lib/purchase-document";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, Role, TaskStatus, UnitStatus } from "@/lib/types";
+import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, PurchaseBuyer, PurchaseDeal, PurchaseSeller, Role, TaskStatus, UnitStatus } from "@/lib/types";
 
-type Page = "dashboard" | "locations" | "units" | "unit-costs" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "users";
-type RegistryPage = Exclude<Page, "dashboard" | "payment-settings" | "unit-costs">;
+type Page = "dashboard" | "locations" | "units" | "unit-costs" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "purchases" | "users";
+type RegistryPage = Exclude<Page, "dashboard" | "payment-settings" | "unit-costs" | "purchases">;
 type EntityType = RegistryPage | "documents";
 type Modal = null | { type: EntityType; id?: number };
 
@@ -30,6 +31,7 @@ const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "payments", label: "Оплаты", icon: Banknote },
   { id: "tasks", label: "Задачи", icon: CheckSquare },
   { id: "payment-settings", label: "Реквизиты", icon: CreditCard },
+  { id: "purchases", label: "Покупка", icon: ShoppingCart },
   { id: "users", label: "Пользователи", icon: Settings }
 ];
 
@@ -44,6 +46,7 @@ const titles: Record<Page, [string, string]> = {
   payments: ["Оплаты", "Зарегистрированные поступления"],
   tasks: ["Задачи", "Напоминания сотрудникам"],
   "payment-settings": ["Платёжные реквизиты", "Настройки банковского QR и почты для чеков"],
+  purchases: ["Покупка", "Договоры и реестр приобретённых объектов"],
   users: ["Пользователи", "Доступ сотрудников к системе"]
 };
 
@@ -79,6 +82,7 @@ export default function Home() {
   const [scanViewerCustomerId, setScanViewerCustomerId] = useState<number | null>(null);
   const [scanUploadCustomerId, setScanUploadCustomerId] = useState<number | null>(null);
   const [telegramCustomerId, setTelegramCustomerId] = useState<number | null>(null);
+  const [purchaseDealId, setPurchaseDealId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,7 +290,7 @@ export default function Home() {
           <button className="menu-button" onClick={() => setSidebar(true)} aria-label="Открыть меню"><Menu /></button>
           <div><h1>{customer ? customer.fullName : titles[page][0]}</h1><p>{customer ? customer.phone : titles[page][1]}</p></div>
           <div className="top-actions">
-            {!["dashboard", "payment-settings", "unit-costs"].includes(page) && !customer && <button className="button primary" onClick={() => setModal({ type: page as RegistryPage })}><Plus size={17} />Добавить</button>}
+            {!["dashboard", "payment-settings", "unit-costs", "purchases"].includes(page) && !customer && <button className="button primary" onClick={() => setModal({ type: page as RegistryPage })}><Plus size={17} />Добавить</button>}
           </div>
         </header>
 
@@ -298,6 +302,8 @@ export default function Home() {
           <PaymentSettingsPage data={data} onSave={update} />
         ) : page === "unit-costs" ? (
           <UnitCostsPage data={data} onSave={update} />
+        ) : page === "purchases" ? (
+          <PurchasesPage data={data} onSave={update} onOpenDeal={setPurchaseDealId} />
         ) : (
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
@@ -312,6 +318,7 @@ export default function Home() {
       {scanViewerCustomerId && <SignedContractsModal customerId={scanViewerCustomerId} data={data} onClose={() => setScanViewerCustomerId(null)} onSave={update} />}
       {scanUploadCustomerId && <SignedContractUploadModal customerId={scanUploadCustomerId} data={data} onClose={() => setScanUploadCustomerId(null)} onSave={update} />}
       {telegramCustomerId && <TelegramInviteModal customerId={telegramCustomerId} data={data} onClose={() => setTelegramCustomerId(null)} />}
+      {purchaseDealId && <PurchaseContractModal dealId={purchaseDealId} data={data} onClose={() => setPurchaseDealId(null)} />}
       {toast && <div className="toast">{toast}</div>}
       {saveError && <div className="toast save-error">{saveError}</div>}
       {isDemo() && <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>}
@@ -771,6 +778,220 @@ function TelegramInviteModal({ customerId, data, onClose }: {
       </section>
     </div>
   );
+}
+
+const emptyBuyer = (id: number): PurchaseBuyer => ({
+  id, label: `Покупатель ${id}`, fullName: "", passport: "", issuedBy: "", issueDate: "",
+  departmentCode: "", registrationAddress: "", phone: "", email: ""
+});
+const emptySeller = (): PurchaseSeller => ({
+  fullName: "", passport: "", issuedBy: "", issueDate: "", departmentCode: "",
+  registrationAddress: "", phone: "", email: ""
+});
+
+function PurchasesPage({ data, onSave, onOpenDeal }: {
+  data: AppData; onSave: (data: AppData, message: string) => void; onOpenDeal: (id: number) => void;
+}) {
+  const buyers = data.purchaseBuyers ?? [];
+  const deals = data.purchaseDeals ?? [];
+  const [tab, setTab] = useState<"contract" | "registry" | "buyers">("contract");
+  const [buyerId, setBuyerId] = useState(buyers[0]?.id ?? 0);
+  const [unitId, setUnitId] = useState(data.units[0]?.id ?? 0);
+  const [error, setError] = useState("");
+  const [dealFormKey, setDealFormKey] = useState(0);
+  const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
+  const unit = data.units.find((item) => item.id === unitId);
+  const costs = data.unitOperatingCosts?.find((item) => item.unitId === unitId);
+  const nextBuyerId = Math.max(0, ...buyers.map((buyer) => buyer.id)) + 1;
+
+  function saveBuyer(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    const form = new FormData(event.currentTarget);
+    const id = selectedBuyer?.id ?? nextBuyerId;
+    if (!selectedBuyer && buyers.length >= 4) { setError("Можно сохранить не более четырёх покупателей"); return; }
+    const buyer: PurchaseBuyer = {
+      id,
+      label: String(form.get("label") ?? "").trim() || `Покупатель ${id}`,
+      fullName: String(form.get("fullName") ?? "").trim(),
+      passport: String(form.get("passport") ?? "").trim(),
+      issuedBy: String(form.get("issuedBy") ?? "").trim(),
+      issueDate: String(form.get("issueDate") ?? ""),
+      departmentCode: String(form.get("departmentCode") ?? "").trim(),
+      registrationAddress: String(form.get("registrationAddress") ?? "").trim(),
+      phone: String(form.get("phone") ?? "").trim(),
+      email: String(form.get("email") ?? "").trim()
+    };
+    if (!buyer.fullName || !buyer.passport || !buyer.registrationAddress) {
+      setError("Заполните ФИО, паспорт и адрес регистрации покупателя"); return;
+    }
+    const next = structuredClone(data);
+    next.purchaseBuyers ??= [];
+    const index = next.purchaseBuyers.findIndex((item) => item.id === id);
+    if (index >= 0) next.purchaseBuyers[index] = buyer; else next.purchaseBuyers.push(buyer);
+    setBuyerId(id);
+    onSave(next, "Покупатель сохранён");
+  }
+
+  function deleteBuyer() {
+    if (!selectedBuyer || deals.some((deal) => deal.buyerId === selectedBuyer.id)) {
+      setError("Нельзя удалить покупателя, который указан в сохранённой сделке"); return;
+    }
+    if (!window.confirm(`Удалить покупателя «${selectedBuyer.label}»?`)) return;
+    const next = structuredClone(data);
+    next.purchaseBuyers = (next.purchaseBuyers ?? []).filter((buyer) => buyer.id !== selectedBuyer.id);
+    onSave(next, "Покупатель удалён");
+    setBuyerId(0);
+  }
+
+  function createDeal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    const form = new FormData(event.currentTarget);
+    const buyer = buyers.find((item) => item.id === Number(form.get("buyerId")));
+    const selectedUnit = data.units.find((item) => item.id === Number(form.get("unitId")));
+    const location = data.locations.find((item) => item.id === selectedUnit?.locationId);
+    if (!buyer) { setError("Сначала сохраните и выберите покупателя"); return; }
+    if (!selectedUnit || !location) { setError("Выберите объект с корректным адресом"); return; }
+    const seller: PurchaseSeller = {
+      ...emptySeller(),
+      fullName: String(form.get("sellerFullName") ?? "").trim(),
+      passport: String(form.get("sellerPassport") ?? "").trim(),
+      issuedBy: String(form.get("sellerIssuedBy") ?? "").trim(),
+      issueDate: String(form.get("sellerIssueDate") ?? ""),
+      departmentCode: String(form.get("sellerDepartmentCode") ?? "").trim(),
+      registrationAddress: String(form.get("sellerRegistrationAddress") ?? "").trim(),
+      phone: String(form.get("sellerPhone") ?? "").trim(),
+      email: String(form.get("sellerEmail") ?? "").trim()
+    };
+    if (!seller.fullName || !seller.passport || !seller.registrationAddress) {
+      setError("Заполните ФИО, паспорт и адрес регистрации продавца"); return;
+    }
+    const dealDate = String(form.get("dealDate") ?? isoToday());
+    const price = Number(form.get("price"));
+    if (!(price > 0)) { setError("Укажите цену сделки больше нуля"); return; }
+    const contractNumber = String(form.get("contractNumber") ?? "").trim() || nextPurchaseContractNumber(deals, dealDate);
+    const paymentTerms = String(form.get("paymentTerms") ?? "").trim();
+    const additionalTerms = String(form.get("additionalTerms") ?? "").trim();
+    const deal: PurchaseDeal = {
+      id: nextId(deals), unitId: selectedUnit.id, buyerId: buyer.id, seller, dealDate, price,
+      contractNumber, paymentTerms, additionalTerms,
+      generatedDocument: generatePurchaseContract({
+        contractNumber, buyer, seller, unit: selectedUnit, location, dealDate, price, paymentTerms, additionalTerms
+      }),
+      createdAt: new Date().toISOString()
+    };
+    const next = structuredClone(data);
+    next.purchaseDeals ??= [];
+    next.purchaseDeals.push(deal);
+    next.unitOperatingCosts ??= [];
+    const cost = next.unitOperatingCosts.find((item) => item.unitId === selectedUnit.id);
+    if (cost) { cost.purchasePrice = price; cost.updatedAt = new Date().toISOString(); }
+    else next.unitOperatingCosts.push({ unitId: selectedUnit.id, purchasePrice: price, monthlyPayment: 0, annualMembershipFees: 0, annualAdditionalExpenses: 0, updatedAt: new Date().toISOString() });
+    onSave(next, "Договор сформирован и сделка добавлена в реестр");
+    setDealFormKey((value) => value + 1);
+    onOpenDeal(deal.id);
+  }
+
+  return <div className="purchase-page">
+    <div className="section-tabs">
+      <button className={tab === "contract" ? "active" : ""} onClick={() => setTab("contract")}><FileText size={16} />Сгенерировать договор</button>
+      <button className={tab === "registry" ? "active" : ""} onClick={() => setTab("registry")}><Archive size={16} />Реестр</button>
+      <button className={tab === "buyers" ? "active" : ""} onClick={() => setTab("buyers")}><Users size={16} />Покупатели</button>
+    </div>
+
+    {tab === "buyers" && <section className="panel purchase-panel">
+      <div className="panel-head"><div><h2>Справочник покупателей</h2><small>Можно сохранить до четырёх постоянных покупателей</small></div>{buyers.length < 4 && <button className="button" onClick={() => setBuyerId(0)}><Plus size={15} />Новый</button>}</div>
+      <div className="buyer-picker">{buyers.map((buyer) => <button key={buyer.id} className={buyerId === buyer.id ? "active" : ""} onClick={() => setBuyerId(buyer.id)}><UserRound size={18} /><span><strong>{buyer.label}</strong><small>{buyer.fullName}</small></span></button>)}</div>
+      <form key={selectedBuyer?.id ?? "new"} onSubmit={saveBuyer}>
+        <div className="form-grid">
+          <Field name="label" label="Короткое название" required defaultValue={selectedBuyer?.label ?? `Покупатель ${nextBuyerId}`} />
+          <Field name="fullName" label="ФИО" required defaultValue={selectedBuyer?.fullName} />
+          <Field name="passport" label="Паспорт" required defaultValue={selectedBuyer?.passport} />
+          <Field name="issueDate" label="Дата выдачи" type="date" defaultValue={selectedBuyer?.issueDate} />
+          <Field name="issuedBy" label="Кем выдан" wide defaultValue={selectedBuyer?.issuedBy} />
+          <Field name="departmentCode" label="Код подразделения" defaultValue={selectedBuyer?.departmentCode} />
+          <Field name="registrationAddress" label="Адрес регистрации" required wide defaultValue={selectedBuyer?.registrationAddress} />
+          <Field name="phone" label="Телефон" defaultValue={selectedBuyer?.phone} />
+          <Field name="email" label="Email" type="email" defaultValue={selectedBuyer?.email} />
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        <div className="settings-actions">
+          {selectedBuyer && <button type="button" className="button danger-button" onClick={deleteBuyer}><Trash2 size={15} />Удалить</button>}
+          <button className="button primary"><Save size={15} />Сохранить покупателя</button>
+        </div>
+      </form>
+    </section>}
+
+    {tab === "contract" && <form key={dealFormKey} className="purchase-contract-layout" onSubmit={createDeal}>
+      <section className="panel purchase-panel">
+        <div className="panel-head"><div><h2>Сделка и объект</h2><small>После сохранения договор останется в реестре в неизменном виде</small></div></div>
+        {!buyers.length && <div className="scan-limit-note">Сначала откройте вкладку «Покупатели» и сохраните хотя бы одного покупателя.</div>}
+        <div className="form-grid">
+          <Select name="buyerId" label="Покупатель" options={buyers.map((buyer) => [buyer.id, `${buyer.label} · ${buyer.fullName}`])} defaultValue={String(buyerId || buyers[0]?.id || "")} />
+          <label>Объект<select name="unitId" value={unitId} onChange={(event) => setUnitId(Number(event.target.value))}>{data.units.map((item) => { const location = data.locations.find((row) => row.id === item.locationId); return <option key={item.id} value={item.id}>№ {item.unitNumber} · {location?.address}</option>; })}</select></label>
+          <Field name="dealDate" label="Дата сделки" type="date" required defaultValue={isoToday()} />
+          <Field name="contractNumber" label="Номер договора" defaultValue={nextPurchaseContractNumber(deals, isoToday())} />
+          <Field key={`purchase-price-${unitId}`} name="price" label="Цена объекта, ₽" type="number" required defaultValue={String(costs?.purchasePrice || "")} />
+          <Field name="paymentTerms" label="Порядок расчётов" wide defaultValue="Полная оплата в день подписания договора" />
+          <Field name="additionalTerms" label="Дополнительные условия" wide />
+        </div>
+      </section>
+      <section className="panel purchase-panel">
+        <div className="panel-head"><div><h2>Продавец</h2><small>Данные используются только для этой сделки и очищаются для следующей</small></div></div>
+        <div className="form-grid">
+          <Field name="sellerFullName" label="ФИО" required wide />
+          <Field name="sellerPassport" label="Паспорт" required />
+          <Field name="sellerIssueDate" label="Дата выдачи" type="date" />
+          <Field name="sellerIssuedBy" label="Кем выдан" wide />
+          <Field name="sellerDepartmentCode" label="Код подразделения" />
+          <Field name="sellerRegistrationAddress" label="Адрес регистрации" required wide />
+          <Field name="sellerPhone" label="Телефон" />
+          <Field name="sellerEmail" label="Email" type="email" />
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        <div className="settings-actions"><button className="button primary" disabled={!buyers.length}><FileDown size={16} />Сформировать и сохранить договор</button></div>
+      </section>
+    </form>}
+
+    {tab === "registry" && <section className="panel purchase-panel">
+      <div className="panel-head"><div><h2>Реестр покупок</h2><small>Нажмите на строку, чтобы открыть сохранённый договор</small></div><span className="badge">{deals.length}</span></div>
+      <SimpleTable headers={["Дата сделки", "Объект", "Адрес", "Покупатель", "Продавец", "Цена", "Договор"]}
+        rows={[...deals].sort((a, b) => b.dealDate.localeCompare(a.dealDate)).map((deal) => {
+          const dealUnit = data.units.find((item) => item.id === deal.unitId);
+          const location = data.locations.find((item) => item.id === dealUnit?.locationId);
+          const buyer = buyers.find((item) => item.id === deal.buyerId);
+          return [date(deal.dealDate), `№ ${dealUnit?.unitNumber ?? "—"}`, location?.address ?? "—", buyer?.fullName ?? "Удалён", deal.seller.fullName, money(deal.price), deal.contractNumber];
+        })}
+        onRowClick={(index) => onOpenDeal([...deals].sort((a, b) => b.dealDate.localeCompare(a.dealDate))[index].id)} />
+    </section>}
+  </div>;
+}
+
+function PurchaseContractModal({ dealId, data, onClose }: { dealId: number; data: AppData; onClose: () => void }) {
+  const deal = data.purchaseDeals?.find((item) => item.id === dealId);
+  if (!deal) return null;
+  function download() {
+    const blob = new Blob([deal!.generatedDocument], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `${deal!.contractNumber}.md`; anchor.click();
+    URL.revokeObjectURL(url);
+  }
+  function print() {
+    const popup = window.open("", "_blank", "width=900,height=700");
+    if (!popup) return;
+    popup.document.write(`<html><head><title>${deal!.contractNumber}</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:30px auto;line-height:1.45;color:#20231f}h1,h2,h3{color:#223426}p{margin:8px 0}@media print{body{margin:0}}</style></head><body>${markdownToHtml(deal!.generatedDocument)}</body></html>`);
+    popup.document.close(); popup.focus(); popup.print();
+  }
+  return <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+    <section className="modal contract-modal">
+      <div className="modal-head"><div><h2>Договор {deal.contractNumber}</h2><small>Сохранён {date(deal.createdAt)} · цена {money(deal.price)}</small></div><button onClick={onClose} aria-label="Закрыть"><X /></button></div>
+      <article className="contract-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(deal.generatedDocument) }} />
+      <div className="modal-actions contract-actions">
+        <button className="button" onClick={download}><Download size={16} />Скачать Markdown</button>
+        <button className="button primary" onClick={print}><Printer size={16} />Распечатать / PDF</button>
+      </div>
+    </section>
+  </div>;
 }
 
 function PaymentSettingsPage({ data, onSave }: { data: AppData; onSave: (data: AppData, message: string) => void }) {
