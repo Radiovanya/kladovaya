@@ -993,13 +993,35 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
 
 function PurchaseContractModal({ dealId, data, onClose }: { dealId: number; data: AppData; onClose: () => void }) {
   const deal = data.purchaseDeals?.find((item) => item.id === dealId);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [error, setError] = useState("");
   if (!deal) return null;
-  function download() {
-    const blob = new Blob([deal!.generatedDocument], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = `${deal!.contractNumber}.md`; anchor.click();
-    URL.revokeObjectURL(url);
+  async function downloadPdf() {
+    setDownloadingPdf(true); setError("");
+    try {
+      const response = await fetch("/api/contracts/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractNumber: deal!.contractNumber, content: deal!.generatedDocument })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error ?? "Не удалось сформировать PDF");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${deal!.contractNumber}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось скачать PDF");
+    } finally {
+      setDownloadingPdf(false);
+    }
   }
   function print() {
     const popup = window.open("", "_blank", "width=900,height=700");
@@ -1010,10 +1032,11 @@ function PurchaseContractModal({ dealId, data, onClose }: { dealId: number; data
   return <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
     <section className="modal contract-modal">
       <div className="modal-head"><div><h2>Договор {deal.contractNumber}</h2><small>Сохранён {date(deal.createdAt)} · цена {money(deal.price)}</small></div><button onClick={onClose} aria-label="Закрыть"><X /></button></div>
+      {error && <div className="form-error">{error}</div>}
       <article className="contract-preview" dangerouslySetInnerHTML={{ __html: markdownToHtml(deal.generatedDocument) }} />
       <div className="modal-actions contract-actions">
-        <button className="button" onClick={download}><Download size={16} />Скачать Markdown</button>
-        <button className="button primary" onClick={print}><Printer size={16} />Распечатать / PDF</button>
+        <button className="button" onClick={downloadPdf} disabled={downloadingPdf}><Download size={16} />{downloadingPdf ? "Формируем PDF…" : "Скачать PDF"}</button>
+        <button className="button primary" onClick={print}><Printer size={16} />Распечатать</button>
       </div>
     </section>
   </div>;
