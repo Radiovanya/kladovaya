@@ -117,11 +117,24 @@ export interface PurchaseSeller {
   phone: string;
   email: string;
 }
+export interface PurchaseObjectDetails {
+  objectType: string;
+  purpose: string;
+  areaSqm: number;
+  address: string;
+  objectNumber: string;
+  cadastralNumber: string;
+  ownershipBasis: string;
+  ownershipRegistrationDate: string;
+  ownershipRegistrationNumber: string;
+  restrictions: string;
+}
 export interface PurchaseDeal {
   id: number;
   unitId: number;
   buyerId: number;
   seller: PurchaseSeller;
+  objectDetails: PurchaseObjectDetails;
   dealDate: string;
   price: number;
   contractNumber: string;

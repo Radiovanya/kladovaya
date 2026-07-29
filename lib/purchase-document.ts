@@ -1,4 +1,4 @@
-import type { Location, PurchaseBuyer, PurchaseDeal, PurchaseSeller, Unit } from "./types";
+import type { PurchaseBuyer, PurchaseDeal, PurchaseObjectDetails, PurchaseSeller } from "./types";
 
 const line = (value: string, fallback = "____________________________") => value.trim() || fallback;
 const moneyWordsHint = (amount: number) => new Intl.NumberFormat("ru-RU").format(amount);
@@ -16,17 +16,16 @@ export function generatePurchaseContract(input: {
   contractNumber: string;
   buyer: PurchaseBuyer;
   seller: PurchaseSeller;
-  unit: Unit;
-  location: Location;
+  objectDetails: PurchaseObjectDetails;
   dealDate: string;
   price: number;
   paymentTerms: string;
   additionalTerms: string;
 }) {
-  const { contractNumber, buyer, seller, unit, location, dealDate, price, paymentTerms, additionalTerms } = input;
+  const { contractNumber, buyer, seller, objectDetails, dealDate, price, paymentTerms, additionalTerms } = input;
   const formattedDate = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "long", year: "numeric" })
     .format(new Date(`${dealDate}T00:00:00`));
-  const objectType = unit.unitType === "garage" ? "гараж" : unit.unitType === "box" ? "бокс" : "кладовую";
+  const objectType = line(objectDetails.objectType, "кладовую");
 
   return `# ДОГОВОР КУПЛИ-ПРОДАЖИ № ${contractNumber}
 
@@ -36,11 +35,15 @@ ${line(seller.fullName)}, именуемый(ая) в дальнейшем «П�
 
 ## 1. Предмет договора
 
-1.1. Продавец обязуется передать в собственность Покупателю, а Покупатель обязуется принять и оплатить ${objectType} № ${line(unit.unitNumber)}, площадью ${unit.areaSqm} кв. м, расположенную(ый) по адресу: ${line(location.address)}.
+1.1. Продавец передаёт в собственность Покупателя, а Покупатель принимает и оплачивает в полном объёме объект недвижимости — ${objectType}, назначение: ${line(objectDetails.purpose, "нежилое помещение")}, общей площадью ${objectDetails.areaSqm} кв. м, расположенный по адресу: ${line(objectDetails.address)}, номер объекта: ${line(objectDetails.objectNumber)}, кадастровый номер: ${line(objectDetails.cadastralNumber)} (далее — «Имущество»).
 
-1.2. Продавец подтверждает, что на дату подписания договора объект не продан, не заложен, не находится под арестом или запретом, не является предметом спора и не обременён правами третьих лиц, кроме прямо указанных в настоящем договоре.
+1.2. Имущество принадлежит Продавцу на праве собственности на основании: ${line(objectDetails.ownershipBasis)}. Право собственности зарегистрировано ${line(objectDetails.ownershipRegistrationDate)}, номер государственной регистрации права: ${line(objectDetails.ownershipRegistrationNumber)}.
 
-1.3. Покупатель осмотрел объект, ознакомился с его состоянием и характеристиками и не имеет претензий к видимым недостаткам.
+1.3. Существующие ограничения (обременения) права: ${line(objectDetails.restrictions, "не зарегистрированы")}.
+
+1.4. Продавец подтверждает, что на дату подписания договора объект не продан, не заложен, не находится под арестом или запретом, не является предметом спора и не обременён правами третьих лиц, кроме прямо указанных в настоящем договоре.
+
+1.5. Покупатель осмотрел объект, ознакомился с его состоянием и характеристиками и не имеет претензий к видимым недостаткам.
 
 ## 2. Цена и порядок расчётов
 
@@ -120,7 +123,7 @@ ${line(seller.fullName)}, именуемый(ая) в дальнейшем «П�
 
 к договору купли-продажи № ${contractNumber} от ${formattedDate}
 
-Продавец передал, а Покупатель принял ${objectType} № ${line(unit.unitNumber)}, площадью ${unit.areaSqm} кв. м, расположенную(ый) по адресу: ${line(location.address)}.
+Продавец передал, а Покупатель принял ${objectType}, номер ${line(objectDetails.objectNumber)}, кадастровый номер ${line(objectDetails.cadastralNumber)}, площадью ${objectDetails.areaSqm} кв. м, расположенный по адресу: ${line(objectDetails.address)}.
 
 Покупатель подтверждает, что объект осмотрен, его состояние известно, ключи и средства доступа получены, претензий по комплектности и видимому состоянию нет.
 

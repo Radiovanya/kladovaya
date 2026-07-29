@@ -13,7 +13,7 @@ import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_P
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
 import { generatePurchaseContract, nextPurchaseContractNumber } from "@/lib/purchase-document";
 import { useAppStore } from "@/lib/store";
-import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, PurchaseBuyer, PurchaseDeal, PurchaseSeller, Role, TaskStatus, UnitStatus } from "@/lib/types";
+import type { AppData, Contract, LandlordSettings, LandlordType, PaymentSettings, PurchaseBuyer, PurchaseDeal, PurchaseObjectDetails, PurchaseSeller, Role, TaskStatus, UnitStatus } from "@/lib/types";
 
 type Page = "dashboard" | "locations" | "units" | "unit-costs" | "customers" | "contracts" | "charges" | "payments" | "tasks" | "payment-settings" | "purchases" | "users";
 type RegistryPage = Exclude<Page, "dashboard" | "payment-settings" | "unit-costs" | "purchases">;
@@ -865,6 +865,21 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
     if (!seller.fullName || !seller.passport || !seller.registrationAddress) {
       setError("Заполните ФИО, паспорт и адрес регистрации продавца"); return;
     }
+    const objectDetails: PurchaseObjectDetails = {
+      objectType: String(form.get("objectType") ?? "").trim(),
+      purpose: String(form.get("objectPurpose") ?? "").trim(),
+      areaSqm: Number(form.get("objectAreaSqm")),
+      address: String(form.get("objectAddress") ?? "").trim(),
+      objectNumber: String(form.get("objectNumber") ?? "").trim(),
+      cadastralNumber: String(form.get("cadastralNumber") ?? "").trim(),
+      ownershipBasis: String(form.get("ownershipBasis") ?? "").trim(),
+      ownershipRegistrationDate: String(form.get("ownershipRegistrationDate") ?? ""),
+      ownershipRegistrationNumber: String(form.get("ownershipRegistrationNumber") ?? "").trim(),
+      restrictions: String(form.get("restrictions") ?? "").trim()
+    };
+    if (!objectDetails.objectType || !objectDetails.purpose || !objectDetails.areaSqm || !objectDetails.address || !objectDetails.objectNumber || !objectDetails.cadastralNumber || !objectDetails.ownershipBasis || !objectDetails.ownershipRegistrationDate || !objectDetails.ownershipRegistrationNumber) {
+      setError("Заполните все обязательные сведения об объекте и праве собственности продавца"); return;
+    }
     const dealDate = String(form.get("dealDate") ?? isoToday());
     const price = Number(form.get("price"));
     if (!(price > 0)) { setError("Укажите цену сделки больше нуля"); return; }
@@ -872,10 +887,10 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
     const paymentTerms = String(form.get("paymentTerms") ?? "").trim();
     const additionalTerms = String(form.get("additionalTerms") ?? "").trim();
     const deal: PurchaseDeal = {
-      id: nextId(deals), unitId: selectedUnit.id, buyerId: buyer.id, seller, dealDate, price,
+      id: nextId(deals), unitId: selectedUnit.id, buyerId: buyer.id, seller, objectDetails, dealDate, price,
       contractNumber, paymentTerms, additionalTerms,
       generatedDocument: generatePurchaseContract({
-        contractNumber, buyer, seller, unit: selectedUnit, location, dealDate, price, paymentTerms, additionalTerms
+        contractNumber, buyer, seller, objectDetails, dealDate, price, paymentTerms, additionalTerms
       }),
       createdAt: new Date().toISOString()
     };
@@ -931,6 +946,16 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
           <Field name="dealDate" label="Дата сделки" type="date" required defaultValue={isoToday()} />
           <Field name="contractNumber" label="Номер договора" defaultValue={nextPurchaseContractNumber(deals, isoToday())} />
           <Field key={`purchase-price-${unitId}`} name="price" label="Цена объекта, ₽" type="number" required defaultValue={String(costs?.purchasePrice || "")} />
+          <Field key={`object-type-${unitId}`} name="objectType" label="Вид объекта" required defaultValue={unit ? unitTypeName(unit.unitType).toLocaleLowerCase("ru") : "кладовка"} />
+          <Field name="objectPurpose" label="Назначение" required defaultValue="Нежилое помещение" />
+          <Field key={`object-area-${unitId}`} name="objectAreaSqm" label="Площадь, м²" type="number" required defaultValue={String(unit?.areaSqm ?? "")} />
+          <Field key={`object-number-${unitId}`} name="objectNumber" label="Номер объекта" required defaultValue={unit?.unitNumber ?? ""} />
+          <Field key={`object-address-${unitId}`} name="objectAddress" label="Полный адрес объекта" required wide defaultValue={data.locations.find((item) => item.id === unit?.locationId)?.address ?? ""} />
+          <Field name="cadastralNumber" label="Кадастровый номер" required wide />
+          <Field name="ownershipBasis" label="Основание права собственности продавца" required wide />
+          <Field name="ownershipRegistrationDate" label="Дата регистрации права" type="date" required />
+          <Field name="ownershipRegistrationNumber" label="Номер регистрации права" required wide />
+          <Field name="restrictions" label="Ограничения / обременения" wide defaultValue="Не зарегистрированы" />
           <Field name="paymentTerms" label="Порядок расчётов" wide defaultValue="Полная оплата в день подписания договора" />
           <Field name="additionalTerms" label="Дополнительные условия" wide />
         </div>
