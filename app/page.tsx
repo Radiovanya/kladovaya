@@ -635,8 +635,11 @@ function TelegramInviteModal({ customerId, data, onClose }: {
   const [expiresAt, setExpiresAt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const binding = data.telegramBindings?.find((item) => item.contractId === contractId && item.isActive);
+  const selectedContract = contracts.find((item) => item.id === contractId);
 
   async function createInvite() {
     setLoading(true); setError(""); setUrl("");
@@ -663,13 +666,48 @@ function TelegramInviteModal({ customerId, data, onClose }: {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
+  async function sendInvite() {
+    if (!customer.email) {
+      setError("В карточке клиента не указан email. Добавьте email или используйте кнопку «Поделиться».");
+      return;
+    }
+    if (!selectedContract || !url) return;
+    setSending(true); setSent(false); setError("");
+    try {
+      const response = await fetch("/api/mail/telegram-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: customer.email,
+          customerName: customer.fullName,
+          contractNumber: selectedContract.contractNumber,
+          inviteUrl: url,
+          expiresAt
+        })
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Не удалось отправить ссылку");
+      setSent(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось отправить ссылку");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function shareInvite() {
+    if (!selectedContract || !url) return;
+    const text = `Подключите уведомления об оплате по договору ${selectedContract.contractNumber}`;
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
       <section className="modal">
         <div className="modal-head"><div><h2>Telegram арендатора</h2><small>{customer.fullName}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
         {!contracts.length ? <div className="empty">У клиента нет активного договора</div> : <>
           <div className="form-grid">
-            <label className="wide">Договор<select value={contractId} onChange={(event) => { setContractId(Number(event.target.value)); setUrl(""); }}>{contracts.map((contract) => <option key={contract.id} value={contract.id}>{contract.contractNumber} · объект {data.units.find((unit) => unit.id === contract.unitId)?.unitNumber}</option>)}</select></label>
+            <label className="wide">Договор<select value={contractId} onChange={(event) => { setContractId(Number(event.target.value)); setUrl(""); setSent(false); setError(""); }}>{contracts.map((contract) => <option key={contract.id} value={contract.id}>{contract.contractNumber} · объект {data.units.find((unit) => unit.id === contract.unitId)?.unitNumber}</option>)}</select></label>
           </div>
           <div className="scan-limit-note">
             {binding
@@ -677,9 +715,15 @@ function TelegramInviteModal({ customerId, data, onClose }: {
               : "Создайте одноразовую ссылку и отправьте её арендатору. Она действует 7 дней и только для выбранного договора."}
           </div>
           {url && <div className="payment-purpose"><span>Одноразовая ссылка</span><strong>{url}</strong><button onClick={copyInvite}><Copy size={15} />{copied ? "Скопировано" : "Копировать"}</button><small>Действует до {expiresAt ? date(expiresAt) : "—"}</small></div>}
+          {sent && <div className="scan-limit-note">Ссылка отправлена на {customer.email}</div>}
         </>}
         {error && <div className="form-error">{error}</div>}
-        <div className="modal-actions"><button className="button" onClick={onClose}>Закрыть</button>{contracts.length > 0 && <button className="button primary" onClick={createInvite} disabled={loading}><MessageCircle size={16} />{loading ? "Создаём…" : "Создать ссылку"}</button>}</div>
+        <div className="modal-actions">
+          <button className="button" onClick={onClose}>Закрыть</button>
+          {url && <button className="button" onClick={shareInvite}><MessageCircle size={16} />Поделиться</button>}
+          {url && <button className="button primary" onClick={sendInvite} disabled={sending || sent}><Mail size={16} />{sending ? "Отправляем…" : sent ? "Отправлено" : "Отправить клиенту"}</button>}
+          {contracts.length > 0 && !url && <button className="button primary" onClick={createInvite} disabled={loading}><MessageCircle size={16} />{loading ? "Создаём…" : "Создать ссылку"}</button>}
+        </div>
       </section>
     </div>
   );
