@@ -36,6 +36,7 @@ export interface Contract {
   id: number; customerId: number; unitId: number; contractNumber: string; startDate: string;
   endDate: string; monthlyRate: number; depositAmount: number; billingDay: number;
   status: ContractStatus; terminationReason: string; note: string;
+  landlordType?: LandlordType;
 }
 export interface Charge {
   id: number; contractId: number; periodStart: string; periodEnd: string; dueDate: string;
@@ -75,6 +76,21 @@ export interface PaymentRequest {
   id: number; contractId: number; period: string; amount: number; purpose: string;
   recipientEmail: string; status: "prepared" | "sent" | "paid" | "expired"; createdAt: string;
 }
+export interface TelegramBinding {
+  id: number; customerId: number; contractId: number; chatId: string;
+  username?: string; linkedAt: string; isActive: boolean;
+}
+export interface TelegramInvite {
+  id: number; customerId: number; contractId: number; tokenHash: string;
+  expiresAt: string; createdAt: string; usedAt?: string;
+}
+export interface TelegramPendingReceipt {
+  chatId: string; contractId: number; period: string; expiresAt: string;
+}
+export interface TelegramNotification {
+  contractId: number; period: string; kind: "advance" | "due";
+  sentAt: string;
+}
 export interface AppData {
   locations: Location[]; units: Unit[]; customers: Customer[]; contracts: Contract[];
   charges: Charge[]; payments: Payment[]; tasks: Task[]; documents: DocumentItem[]; users: User[];
@@ -84,4 +100,8 @@ export interface AppData {
   paymentRequests?: PaymentRequest[];
   unitOperatingCosts?: UnitOperatingCosts[];
   unitStatusHistory?: UnitStatusEvent[];
+  telegramBindings?: TelegramBinding[];
+  telegramInvites?: TelegramInvite[];
+  telegramPendingReceipts?: TelegramPendingReceipt[];
+  telegramNotifications?: TelegramNotification[];
 }

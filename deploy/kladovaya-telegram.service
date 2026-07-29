@@ -1,0 +1,11 @@
+[Unit]
+Description=Send scheduled Kladovaya Telegram payment notifications
+After=network-online.target kladovaya.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/kladovaya/.env
+ExecStart=/opt/kladovaya/process-telegram-notifications.sh
+User=root
+Group=root

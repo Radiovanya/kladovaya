@@ -3,7 +3,7 @@
 import {
   Archive, Banknote, BarChart3, Boxes, Building2, CheckSquare, ChevronRight, CircleDollarSign,
   Copy, CreditCard, Download, ExternalLink, Eye, EyeOff, FileDown, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, Wrench, X
+  Menu, MessageCircle, Pencil, Plus, Printer, QrCode, Save, Search, Settings, Trash2, Upload, UserRound, Users, Warehouse, Wrench, X
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
@@ -77,6 +77,7 @@ export default function Home() {
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
   const [scanViewerCustomerId, setScanViewerCustomerId] = useState<number | null>(null);
   const [scanUploadCustomerId, setScanUploadCustomerId] = useState<number | null>(null);
+  const [telegramCustomerId, setTelegramCustomerId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,7 +214,7 @@ export default function Home() {
         </header>
 
         {customer ? (
-          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} />
+          <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} onTelegram={setTelegramCustomerId} />
         ) : page === "dashboard" ? (
           <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
@@ -233,6 +234,7 @@ export default function Home() {
       {selectedPaymentId && <PaymentDetailsModal paymentId={selectedPaymentId} data={data} onClose={() => setSelectedPaymentId(null)} />}
       {scanViewerCustomerId && <SignedContractsModal customerId={scanViewerCustomerId} data={data} onClose={() => setScanViewerCustomerId(null)} onSave={update} />}
       {scanUploadCustomerId && <SignedContractUploadModal customerId={scanUploadCustomerId} data={data} onClose={() => setScanUploadCustomerId(null)} onSave={update} />}
+      {telegramCustomerId && <TelegramInviteModal customerId={telegramCustomerId} data={data} onClose={() => setTelegramCustomerId(null)} />}
       {toast && <div className="toast">{toast}</div>}
       {saveError && <div className="toast save-error">{saveError}</div>}
       {isDemo() && <button className="demo-reset" onClick={() => { reset(); notify("Демо-данные восстановлены"); }}><Archive size={15} />Сбросить демо</button>}
@@ -570,11 +572,12 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   );
 }
 
-function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument, onPayment, onViewScans, onUploadScan }: {
+function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, onContractDocument, onPayment, onViewScans, onUploadScan, onTelegram }: {
   data: AppData; customerId: number; tab: string; setTab: (tab: string) => void; onBack: () => void;
   onAdd: (page: EntityType) => void; onQr: (contractId: number) => void; onContractDocument: (contractId: number) => void;
   onPayment: (paymentId: number) => void;
   onViewScans: (customerId: number) => void; onUploadScan: (customerId: number) => void;
+  onTelegram: (customerId: number) => void;
 }) {
   const customer = data.customers.find((item) => item.id === customerId)!;
   const contracts = data.contracts.filter((item) => item.customerId === customerId);
@@ -602,6 +605,7 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
         <div className="detail-action">
           {active && <button className="button primary" onClick={() => onQr(active.id)}><QrCode size={16} />QR для оплаты</button>}
           {active && <button className="button" onClick={() => onContractDocument(active.id)}><FileDown size={16} />Сформировать договор</button>}
+          <button className="button" onClick={() => onTelegram(customerId)}><MessageCircle size={16} />Telegram</button>
           <button className="button" onClick={() => onViewScans(customerId)}><Eye size={16} />Посмотреть договор</button>
           <button className="button" onClick={() => onUploadScan(customerId)} disabled={!eligibleContractsForScan(data, customerId).length || customerContractScans(data, customerId).length >= MAX_SIGNED_CONTRACTS_PER_CUSTOMER}><Upload size={16} />Загрузить договор</button>
           <button className="button" onClick={() => onAdd(tab as EntityType)}><Plus size={16} />Добавить</button>
@@ -618,6 +622,66 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
         {tab === "tasks" && <SimpleTable headers={["Задача", "Срок", "Статус"]} rows={tasks.map((x) => [x.title, date(x.dueDate), badge(x.status)])} />}
       </div>
     </section>
+  );
+}
+
+function TelegramInviteModal({ customerId, data, onClose }: {
+  customerId: number; data: AppData; onClose: () => void;
+}) {
+  const customer = data.customers.find((item) => item.id === customerId)!;
+  const contracts = data.contracts.filter((item) => item.customerId === customerId && item.status === "active");
+  const [contractId, setContractId] = useState(contracts[0]?.id ?? 0);
+  const [url, setUrl] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const binding = data.telegramBindings?.find((item) => item.contractId === contractId && item.isActive);
+
+  async function createInvite() {
+    setLoading(true); setError(""); setUrl("");
+    try {
+      const response = await fetch("/api/telegram/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId, contractId })
+      });
+      const payload = await response.json().catch(() => ({})) as { url?: string; expiresAt?: string; error?: string };
+      if (!response.ok || !payload.url) throw new Error(payload.error ?? "Не удалось создать ссылку");
+      setUrl(payload.url);
+      setExpiresAt(payload.expiresAt ?? "");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось создать ссылку");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function copyInvite() {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section className="modal">
+        <div className="modal-head"><div><h2>Telegram арендатора</h2><small>{customer.fullName}</small></div><button type="button" onClick={onClose} aria-label="Закрыть"><X /></button></div>
+        {!contracts.length ? <div className="empty">У клиента нет активного договора</div> : <>
+          <div className="form-grid">
+            <label className="wide">Договор<select value={contractId} onChange={(event) => { setContractId(Number(event.target.value)); setUrl(""); }}>{contracts.map((contract) => <option key={contract.id} value={contract.id}>{contract.contractNumber} · объект {data.units.find((unit) => unit.id === contract.unitId)?.unitNumber}</option>)}</select></label>
+          </div>
+          <div className="scan-limit-note">
+            {binding
+              ? `Telegram уже подключён${binding.username ? `: @${binding.username}` : ""}. Новая ссылка перепривяжет договор к новому чату.`
+              : "Создайте одноразовую ссылку и отправьте её арендатору. Она действует 7 дней и только для выбранного договора."}
+          </div>
+          {url && <div className="payment-purpose"><span>Одноразовая ссылка</span><strong>{url}</strong><button onClick={copyInvite}><Copy size={15} />{copied ? "Скопировано" : "Копировать"}</button><small>Действует до {expiresAt ? date(expiresAt) : "—"}</small></div>}
+        </>}
+        {error && <div className="form-error">{error}</div>}
+        <div className="modal-actions"><button className="button" onClick={onClose}>Закрыть</button>{contracts.length > 0 && <button className="button primary" onClick={createInvite} disabled={loading}><MessageCircle size={16} />{loading ? "Создаём…" : "Создать ссылку"}</button>}</div>
+      </section>
+    </div>
   );
 }
 
@@ -1232,7 +1296,7 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
       }
       else if (modal.type === "customers") upsert(next.customers, { id: modal.id ?? nextId(next.customers), customerType: (editing?.customerType as "individual" | "business" | undefined) ?? "individual", fullName: input(form, "fullName"), phone: input(form, "phone"), email: input(form, "email"), passportOrRegistrationData: input(form, "registration"), taxId: input(form, "taxId"), address: input(form, "address"), note: input(form, "note") });
       else if (modal.type === "contracts") {
-        const candidate: Contract = { id: modal.id ?? nextId(next.contracts), customerId: Number(input(form, "customerId")), unitId: Number(input(form, "unitId")), contractNumber: input(form, "contractNumber"), startDate: input(form, "startDate"), endDate: input(form, "endDate"), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), billingDay: Number(input(form, "billingDay")), status: input(form, "status") as "active", terminationReason: value("terminationReason"), note: input(form, "note") };
+        const candidate: Contract = { id: modal.id ?? nextId(next.contracts), customerId: Number(input(form, "customerId")), unitId: Number(input(form, "unitId")), contractNumber: input(form, "contractNumber"), startDate: input(form, "startDate"), endDate: input(form, "endDate"), monthlyRate: Number(input(form, "monthlyRate")), depositAmount: Number(input(form, "depositAmount")), billingDay: Number(input(form, "billingDay")), status: input(form, "status") as "active", terminationReason: value("terminationReason"), note: input(form, "note"), landlordType: input(form, "landlordType") as LandlordType };
         validateActiveContract(candidate, next.contracts); upsert(next.contracts, candidate);
         if (candidate.status === "active") {
           next.units.find((unit) => unit.id === candidate.unitId)!.status = "occupied";
@@ -1274,7 +1338,7 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
           {modal.type === "locations" && <><Field name="name" label="Название" required defaultValue={value("name")} /><Field name="address" label="Адрес" required defaultValue={value("address")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
           {modal.type === "units" && <><Select name="locationId" label="Адрес" options={data.locations.map((x) => [x.id, x.name])} defaultValue={value("locationId")} /><Field name="unitNumber" label="Номер" required defaultValue={value("unitNumber")} /><Select name="status" label="Статус" options={[["occupied", "Занята"], ["free", "Свободна"], ["maintenance", "В ремонте"]]} defaultValue={value("status", "free")} /><Select name="unitType" label="Тип" options={[["storage", "Кладовка"], ["garage", "Гараж"], ["box", "Бокс"]]} defaultValue={value("unitType")} /><Field name="areaSqm" label="Площадь, м²" type="number" required defaultValue={value("areaSqm")} /><Field name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate")} /><Field name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount")} /><Field name="photoUrl" label="Ссылка на фото в Яндекс Облаке" type="url" wide defaultValue={value("photoUrl")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "customers" && <><Field name="fullName" label="ФИО" required defaultValue={value("fullName")} /><Field name="phone" label="Телефон" required defaultValue={value("phone")} /><Field name="email" label="Email" type="email" defaultValue={value("email")} /><Field name="registration" label="Паспорт / регистрационные данные" wide defaultValue={value("passportOrRegistrationData")} /><Field name="taxId" label="ИНН" defaultValue={value("taxId")} /><Field name="address" label="Адрес" defaultValue={value("address")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
-          {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><label>Объект<select name="unitId" value={rentalUnitId} onChange={(event) => setRentalUnitId(Number(event.target.value))}>{data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => <option key={x.id} value={x.id}>{x.unitNumber} · {unitTypeName(x.unitType)} · {money(x.monthlyRate)}</option>)}</select></label><Field name="contractNumber" label="Номер договора" required readOnly defaultValue={value("contractNumber", nextContractNumber(data.contracts))} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field key={`rate-${rentalUnitId}`} name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate", String(rentalUnit?.monthlyRate ?? ""))} /><Field key={`deposit-${rentalUnitId}`} name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount", String(rentalUnit?.depositAmount ?? ""))} /><Field name="billingDay" label="День начисления" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
+          {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><label>Объект<select name="unitId" value={rentalUnitId} onChange={(event) => setRentalUnitId(Number(event.target.value))}>{data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => <option key={x.id} value={x.id}>{x.unitNumber} · {unitTypeName(x.unitType)} · {money(x.monthlyRate)}</option>)}</select></label><Field name="contractNumber" label="Номер договора" required readOnly defaultValue={value("contractNumber", nextContractNumber(data.contracts))} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Select name="landlordType" label="Получатель оплаты" options={[["entrepreneur", "ИП / юридическое лицо — QR"], ["individual", "Физическое лицо — карта"]]} defaultValue={value("landlordType", "entrepreneur")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field key={`rate-${rentalUnitId}`} name="monthlyRate" label="Ставка, ₽" type="number" required defaultValue={value("monthlyRate", String(rentalUnit?.monthlyRate ?? ""))} /><Field key={`deposit-${rentalUnitId}`} name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount", String(rentalUnit?.depositAmount ?? ""))} /><Field name="billingDay" label="День начисления" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "charges" && <><Select name="contractId" label="Активный договор" options={data.contracts.filter((x) => x.status === "active").map((x) => [x.id, x.contractNumber])} defaultValue={value("contractId")} /><Select name="chargeType" label="Тип" options={[["rent", "Аренда"], ["deposit", "Депозит"], ["penalty", "Пени"], ["other", "Другое"]]} defaultValue={value("chargeType")} /><Field name="periodStart" label="Начало периода" type="date" required defaultValue={value("periodStart", "2026-08-01")} /><Field name="periodEnd" label="Конец периода" type="date" required defaultValue={value("periodEnd", "2026-08-31")} /><Field name="dueDate" label="Срок оплаты" type="date" required defaultValue={value("dueDate", "2026-08-05")} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "payments" && <><label>Клиент<select name="customerId" value={customerId} onChange={(e) => { const id = Number(e.target.value); setCustomerId(id); const c = data.contracts.find((x) => x.customerId === id && x.status === "active"); if (c) setContractId(c.id); }}>{data.customers.map((x) => <option value={x.id} key={x.id}>{x.fullName}</option>)}</select></label><label>Договор<select name="contractId" value={contractId} onChange={(e) => setContractId(Number(e.target.value))}>{data.contracts.filter((x) => x.customerId === customerId).map((x) => <option value={x.id} key={x.id}>{x.contractNumber}</option>)}</select></label><Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} /><Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} /></>}
           {modal.type === "tasks" && <><Field name="title" label="Название" required wide defaultValue={value("title")} /><Field name="dueDate" label="Срок" type="datetime-local" required defaultValue={value("dueDate")} /><Select name="priority" label="Приоритет" options={[["low", "Низкий"], ["medium", "Средний"], ["high", "Высокий"]]} defaultValue={value("priority")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
