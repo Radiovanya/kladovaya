@@ -8,7 +8,7 @@ import { encryptDocument } from "@/lib/server/document-crypto";
 import { assertS3Configured, documentsBucket, s3 } from "@/lib/server/s3";
 import { secureEqual } from "@/lib/server/security";
 import { answerTelegramCallback, downloadTelegramFile, sendTelegramMessage } from "@/lib/server/telegram";
-import type { AppData, DocumentItem, Task, TelegramBinding } from "@/lib/types";
+import type { AppData, Charge, DocumentItem, Task, TelegramBinding } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +63,31 @@ function receiptTask(data: AppData, contractId: number, period: string, referenc
     relatedEntityId: contractId,
     paymentPeriod: period
   } satisfies Task);
+}
+
+function ensureReceiptCharge(data: AppData, contractId: number, period: string) {
+  const existing = data.charges.find((item) =>
+    item.contractId === contractId && item.chargeType === "rent" && item.periodStart.slice(0, 7) === period
+  );
+  if (existing) return existing;
+  const contract = data.contracts.find((item) => item.id === contractId);
+  if (!contract) throw new Error("Договор не найден");
+  const [year, month] = period.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  const billingDay = Math.min(Math.max(Math.trunc(contract.billingDay || 1), 1), lastDay);
+  const charge: Charge = {
+    id: nextId(data.charges),
+    contractId,
+    periodStart: `${period}-01`,
+    periodEnd: `${period}-${String(lastDay).padStart(2, "0")}`,
+    dueDate: `${period}-${String(billingDay).padStart(2, "0")}`,
+    amount: contract.monthlyRate,
+    chargeType: "rent",
+    status: "pending",
+    note: "Создано при получении квитанции через Telegram"
+  };
+  data.charges.push(charge);
+  return charge;
 }
 
 export async function POST(request: Request) {
@@ -198,6 +223,7 @@ export async function POST(request: Request) {
         documentType: "receipt", mimeType, fileSize: content.length, uploadedAt: new Date().toISOString()
       } satisfies DocumentItem);
       const reference = `TG-${update.update_id}`;
+      ensureReceiptCharge(data, pending.contractId, pending.period);
       receiptTask(data, pending.contractId, pending.period, reference);
       data.telegramPendingReceipts = data.telegramPendingReceipts.filter((item) => item !== pending);
       changed = true;

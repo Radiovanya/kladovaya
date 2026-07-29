@@ -159,6 +159,78 @@ export default function Home() {
     const next = structuredClone(data);
     const task = next.tasks.find((item) => item.id === id);
     if (!task) return;
+    if (
+      status === "paid" &&
+      task.relatedEntityType === "contract_payment" &&
+      task.relatedEntityId &&
+      task.paymentPeriod
+    ) {
+      const contract = next.contracts.find((item) => item.id === task.relatedEntityId);
+      if (!contract) { notify("Договор не найден"); return; }
+      if (!window.confirm(`Подтвердить поступление ${money(contract.monthlyRate)} по договору ${contract.contractNumber}? Оплата появится в реестре.`)) return;
+      const period = task.paymentPeriod;
+      const [year, month] = period.split("-").map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      let charge = next.charges.find((item) =>
+        item.contractId === contract.id && item.chargeType === "rent" && item.periodStart.slice(0, 7) === period
+      );
+      if (!charge) {
+        charge = {
+          id: nextId(next.charges),
+          contractId: contract.id,
+          periodStart: `${period}-01`,
+          periodEnd: `${period}-${String(lastDay).padStart(2, "0")}`,
+          dueDate: paymentTaskDueDate(contract, period).slice(0, 10),
+          amount: contract.monthlyRate,
+          chargeType: "rent",
+          status: "pending",
+          note: "Создано при подтверждении оплаты"
+        };
+        next.charges.push(charge);
+      }
+      const existingPayment = next.payments.find((item) => item.chargeId === charge!.id);
+      if (!existingPayment) {
+        const receipt = [...next.documents].reverse().find((item) =>
+          item.entityType === "contract" &&
+          item.entityId === contract.id &&
+          item.documentType === "receipt" &&
+          item.fileUrl.includes(encodeURIComponent(period))
+        ) ?? [...next.documents].reverse().find((item) =>
+          item.entityType === "contract" && item.entityId === contract.id && item.documentType === "receipt"
+        );
+        const paymentId = nextId(next.payments);
+        next.payments.push({
+          id: paymentId,
+          customerId: contract.customerId,
+          contractId: contract.id,
+          chargeId: charge.id,
+          paymentDate: isoToday(),
+          amount: charge.amount,
+          paymentMethod: contract.landlordType === "individual" ? "card" : "bank_transfer",
+          referenceNumber: task.description.match(/TG-\d+/)?.[0] ?? "",
+          comment: receipt ? "Подтверждено сотрудником по квитанции из Telegram" : "Подтверждено сотрудником вручную"
+        });
+        if (receipt) {
+          receipt.entityType = "payment";
+          receipt.entityId = paymentId;
+        }
+      }
+      charge.status = "paid";
+      next.tasks
+        .filter((item) =>
+          item.relatedEntityType === "contract_payment" &&
+          item.relatedEntityId === contract.id &&
+          item.paymentPeriod === period
+        )
+        .forEach((item) => { item.status = "paid"; });
+      const request = [...(next.paymentRequests ?? [])].reverse().find((item) =>
+        item.contractId === contract.id && item.period === period
+      );
+      if (request) request.status = "paid";
+      setData(next);
+      notify("Оплата подтверждена и внесена в реестр");
+      return;
+    }
     task.status = status;
     if (task.relatedEntityType === "contract_payment" && task.relatedEntityId && task.paymentPeriod && (status === "sent" || status === "paid")) {
       const request = [...(next.paymentRequests ?? [])].reverse().find((item) =>
