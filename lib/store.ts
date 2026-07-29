@@ -58,6 +58,23 @@ export function useAppStore() {
   }, []);
 
   useEffect(() => {
+    if (isStaticDemo()) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        load().catch((error) => setSaveError(error instanceof Error ? error.message : "Не удалось обновить данные"));
+      }
+    };
+    const timer = window.setInterval(refresh, 15_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ready) return;
     if (!remote) {
       if (isStaticDemo()) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
