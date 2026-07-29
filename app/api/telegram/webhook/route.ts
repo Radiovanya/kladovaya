@@ -2,6 +2,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { currentPaymentPeriod } from "@/lib/business";
 import { prisma } from "@/lib/prisma";
 import { encryptDocument } from "@/lib/server/document-crypto";
 import { assertS3Configured, documentsBucket, s3 } from "@/lib/server/s3";
@@ -33,6 +34,12 @@ type TelegramUpdate = {
 const nextId = (items: Array<{ id: number }>) => Math.max(0, ...items.map((item) => item.id)) + 1;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const html = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const receiptButton = (contractId: number, period: string) => ({
+  inline_keyboard: [[{
+    text: "📎 Отправить квитанцию",
+    callback_data: `receipt:${contractId}:${period}`
+  }]]
+});
 
 function detectedMime(content: Buffer) {
   if (content.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
@@ -112,8 +119,28 @@ export async function POST(request: Request) {
     await sendTelegramMessage(
       botToken,
       String(message.chat.id),
-      `✅ Уведомления подключены.\nДоговор: <b>${html(contract?.contractNumber ?? "")}</b>\n\nБот будет заранее присылать реквизиты оплаты. Квитанцию отправляйте только после нажатия кнопки «Отправить квитанцию».`
+      `✅ Уведомления подключены.\nДоговор: <b>${html(contract?.contractNumber ?? "")}</b>\n\nБот будет заранее присылать реквизиты оплаты. Для отправки чека нажмите кнопку ниже.`,
+      receiptButton(invite.contractId, currentPaymentPeriod(now))
     );
+  }
+
+  if (message?.text?.match(/^\/start(?:@\w+)?$/) && !startToken) {
+    const chatId = String(message.chat.id);
+    const bindings = data.telegramBindings.filter((item) => item.chatId === chatId && item.isActive);
+    if (!bindings.length) {
+      await sendTelegramMessage(botToken, chatId, "Бот ещё не связан с договором. Попросите сотрудника прислать персональную ссылку из карточки клиента.");
+    } else {
+      const period = currentPaymentPeriod(new Date());
+      for (const binding of bindings) {
+        const contract = data.contracts.find((item) => item.id === binding.contractId);
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `Договор: <b>${html(contract?.contractNumber ?? "")}</b>\nПериод оплаты: <b>${period}</b>\n\nНажмите кнопку, затем отправьте фото или PDF квитанции.`,
+          receiptButton(binding.contractId, period)
+        );
+      }
+    }
   }
 
   const callback = update.callback_query;
@@ -174,7 +201,12 @@ export async function POST(request: Request) {
       receiptTask(data, pending.contractId, pending.period, reference);
       data.telegramPendingReceipts = data.telegramPendingReceipts.filter((item) => item !== pending);
       changed = true;
-      await sendTelegramMessage(botToken, chatId, "✅ Квитанция получена и прикреплена к договору. Сотрудник проверит поступление денег.");
+      await sendTelegramMessage(
+        botToken,
+        chatId,
+        "✅ Квитанция получена и прикреплена к договору. Сотрудник проверит поступление денег.",
+        receiptButton(pending.contractId, pending.period)
+      );
     } catch (error) {
       await sendTelegramMessage(botToken, chatId, `Не удалось сохранить квитанцию: ${html(error instanceof Error ? error.message : "ошибка файла")}.`);
     }
