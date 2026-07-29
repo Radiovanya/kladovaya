@@ -315,6 +315,50 @@ export function normalizeObjectPhotoUrl(value: string) {
 }
 
 const pad = (value: number) => String(value).padStart(2, "0");
+const parseIsoDate = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+};
+const addMonthsClamped = (date: Date, months: number) => {
+  const targetMonth = date.getMonth() + months;
+  const lastDay = new Date(date.getFullYear(), targetMonth + 1, 0).getDate();
+  return new Date(date.getFullYear(), targetMonth, Math.min(date.getDate(), lastDay), 12);
+};
+
+export function syncContractPaymentSchedule(data: AppData, contractId: number) {
+  const next = structuredClone(data);
+  const contract = next.contracts.find((item) => item.id === contractId);
+  if (!contract?.paymentIntervalMonths || contract.status === "draft") return next;
+  const interval = contract.paymentIntervalMonths;
+  const contractEnd = parseIsoDate(contract.endDate);
+  let periodStart = parseIsoDate(contract.startDate);
+  let dueDate = parseIsoDate(contract.firstPaymentDate || contract.startDate);
+
+  while (periodStart <= contractEnd) {
+    const nextStart = addMonthsClamped(periodStart, interval);
+    const periodEnd = new Date(Math.min(contractEnd.getTime(), nextStart.getTime() - 86_400_000));
+    const startValue = isoDate(periodStart);
+    const existing = next.charges.find((item) =>
+      item.contractId === contract.id && item.chargeType === "rent" && item.periodStart === startValue
+    );
+    if (!existing) {
+      next.charges.push({
+        id: Math.max(0, ...next.charges.map((item) => item.id)) + 1,
+        contractId: contract.id,
+        periodStart: startValue,
+        periodEnd: isoDate(periodEnd),
+        dueDate: isoDate(dueDate),
+        amount: contract.monthlyRate * interval,
+        chargeType: "rent",
+        status: "pending",
+        note: `Автоматический график · период ${interval} мес.`
+      });
+    }
+    periodStart = nextStart;
+    dueDate = addMonthsClamped(dueDate, interval);
+  }
+  return next;
+}
 
 export function currentPaymentPeriod(now = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
@@ -343,8 +387,8 @@ function paymentTaskStatus(data: AppData, contractId: number, period: string, no
 
 export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppData {
   const next = ensureUnitStatusHistory(data, now);
-  const period = currentPaymentPeriod(now);
-  const [year, month] = period.split("-").map(Number);
+  const currentPeriod = currentPaymentPeriod(now);
+  const [year, month] = currentPeriod.split("-").map(Number);
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 0, 23, 59, 59);
 
@@ -356,7 +400,13 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     ) continue;
 
     const customer = next.customers.find((item) => item.id === contract.customerId);
-    const dueDate = paymentTaskDueDate(contract, period);
+    const scheduledCharge = contract.paymentIntervalMonths
+      ? next.charges
+        .filter((item) => item.contractId === contract.id && item.chargeType === "rent" && item.status !== "cancelled" && effectiveChargeStatus(item.id, next, now) !== "paid")
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]
+      : undefined;
+    const period = scheduledCharge?.periodStart.slice(0, 7) ?? currentPeriod;
+    const dueDate = scheduledCharge ? `${scheduledCharge.dueDate}T09:00` : paymentTaskDueDate(contract, period);
     const existing = next.tasks.find((task) =>
       task.relatedEntityType === "contract_payment" &&
       task.relatedEntityId === contract.id &&
@@ -364,7 +414,7 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     );
     if (existing) {
       existing.dueDate = dueDate;
-      existing.title = `Отправить QR · ${contract.contractNumber}`;
+      existing.title = `Отправить оплату · ${contract.contractNumber}`;
       existing.priority = new Date(dueDate) <= now ? "high" : "medium";
       const detectedStatus = paymentTaskStatus(next, contract.id, period, now);
       if (detectedStatus !== "open") existing.status = detectedStatus;
@@ -372,8 +422,8 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     }
     next.tasks.push({
       id: Math.max(0, ...next.tasks.map((task) => task.id)) + 1,
-      title: `Отправить QR · ${contract.contractNumber}`,
-      description: `Ежемесячная оплата ${money(contract.monthlyRate)}${customer?.email ? ` · ${customer.email}` : " · email не указан"}`,
+      title: `Отправить оплату · ${contract.contractNumber}`,
+      description: `${scheduledCharge ? `Оплата за ${scheduledCharge.periodStart}–${scheduledCharge.periodEnd}` : "Ежемесячная оплата"} ${money(scheduledCharge?.amount ?? contract.monthlyRate)}${customer?.email ? ` · ${customer.email}` : ""}`,
       dueDate,
       priority: new Date(dueDate) <= now ? "high" : "medium",
       status: paymentTaskStatus(next, contract.id, period, now),

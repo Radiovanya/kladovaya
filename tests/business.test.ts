@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import QRCode from "qrcode";
-import { buildPaymentQrPayload, calculateChargeStatus, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncMonthlyPaymentTasks, unitAnalytics, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
 import { findContractNumber, findPaymentPeriod } from "../lib/receipt-email";
@@ -203,6 +203,44 @@ test("повторная синхронизация не дублирует за
 test("день оплаты ограничивается последним днём короткого месяца", () => {
   const contract = { ...seedData.contracts[0], billingDay: 31 };
   assert.equal(paymentTaskDueDate(contract, "2027-02"), "2027-02-28T09:00");
+});
+
+test("квартальный договор создаёт график начислений по 3 месяца", () => {
+  const data = structuredClone(seedData);
+  data.charges = [];
+  data.payments = [];
+  data.contracts = [{
+    ...data.contracts[0],
+    id: 50,
+    startDate: "2026-08-15",
+    endDate: "2027-08-14",
+    monthlyRate: 2000,
+    paymentIntervalMonths: 3,
+    firstPaymentDate: "2026-08-10",
+    advanceNoticeDays: 5
+  }];
+  const result = syncContractPaymentSchedule(data, 50);
+  assert.equal(result.charges.length, 4);
+  assert.deepEqual(
+    result.charges.map((charge) => [charge.periodStart, charge.periodEnd, charge.dueDate, charge.amount]),
+    [
+      ["2026-08-15", "2026-11-14", "2026-08-10", 6000],
+      ["2026-11-15", "2027-02-14", "2026-11-10", 6000],
+      ["2027-02-15", "2027-05-14", "2027-02-10", 6000],
+      ["2027-05-15", "2027-08-14", "2027-05-10", 6000]
+    ]
+  );
+});
+
+test("ожидающая проверки Telegram-оплата не закрывает начисление", () => {
+  const data = structuredClone(seedData);
+  data.payments = [{
+    ...data.payments[0],
+    chargeId: data.charges[0].id,
+    amount: data.charges[0].amount,
+    status: "pending_verification"
+  }];
+  assert.equal(chargePaidAmount(data.charges[0].id, data), 0);
 });
 
 test("номер договора продолжает последовательность текущего года", () => {

@@ -40,6 +40,11 @@ const receiptButton = (contractId: number, period: string) => ({
     callback_data: `receipt:${contractId}:${period}`
   }]]
 });
+const receiptPeriod = (data: AppData, contractId: number, now = new Date()) =>
+  data.charges
+    .filter((item) => item.contractId === contractId && item.chargeType === "rent" && item.status !== "paid" && item.status !== "cancelled")
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]
+    ?.periodStart.slice(0, 7) ?? currentPaymentPeriod(now);
 
 function detectedMime(content: Buffer) {
   if (content.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
@@ -145,7 +150,7 @@ export async function POST(request: Request) {
       botToken,
       String(message.chat.id),
       `✅ Уведомления подключены.\nДоговор: <b>${html(contract?.contractNumber ?? "")}</b>\n\nБот будет заранее присылать реквизиты оплаты. Для отправки чека нажмите кнопку ниже.`,
-      receiptButton(invite.contractId, currentPaymentPeriod(now))
+      receiptButton(invite.contractId, receiptPeriod(data, invite.contractId, now))
     );
   }
 
@@ -155,9 +160,9 @@ export async function POST(request: Request) {
     if (!bindings.length) {
       await sendTelegramMessage(botToken, chatId, "Бот ещё не связан с договором. Попросите сотрудника прислать персональную ссылку из карточки клиента.");
     } else {
-      const period = currentPaymentPeriod(new Date());
       for (const binding of bindings) {
         const contract = data.contracts.find((item) => item.id === binding.contractId);
+        const period = receiptPeriod(data, binding.contractId);
         await sendTelegramMessage(
           botToken,
           chatId,

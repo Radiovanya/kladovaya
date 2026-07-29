@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import QRCode from "qrcode";
 import { NextResponse } from "next/server";
-import { buildPaymentQrPayload, currentPaymentPeriod, effectiveChargeStatus, money, paymentPurpose, paymentTaskDueDate } from "@/lib/business";
+import { buildPaymentQrPayload, effectiveChargeStatus, money, paymentPurpose } from "@/lib/business";
 import { prisma } from "@/lib/prisma";
 import { secureEqual } from "@/lib/server/security";
 import { sendTelegramMessage, sendTelegramPhoto } from "@/lib/server/telegram";
@@ -34,19 +34,24 @@ export async function POST(request: Request) {
   data.paymentRequests ??= [];
   const now = new Date();
   const today = dateOnly(now);
-  const period = currentPaymentPeriod(now);
   let sent = 0;
 
   for (const binding of data.telegramBindings.filter((item) => item.isActive)) {
     const contract = data.contracts.find((item) => item.id === binding.contractId);
     if (!contract || contract.status !== "active" || contract.startDate > today || contract.endDate < today) continue;
-    const charge = data.charges.find((item) =>
-      item.contractId === contract.id && item.periodStart.slice(0, 7) === period
-    );
-    if (charge && effectiveChargeStatus(charge.id, data, now) === "paid") continue;
-    const dueDate = paymentTaskDueDate(contract, period).slice(0, 10);
+    const charge = data.charges
+      .filter((item) =>
+        item.contractId === contract.id &&
+        item.chargeType === "rent" &&
+        item.status !== "cancelled" &&
+        effectiveChargeStatus(item.id, data, now) !== "paid"
+      )
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+    if (!charge) continue;
+    const period = charge.periodStart.slice(0, 7);
+    const dueDate = charge.dueDate;
     const advance = new Date(`${dueDate}T00:00:00`);
-    advance.setDate(advance.getDate() - 3);
+    advance.setDate(advance.getDate() - (contract.advanceNoticeDays ?? 3));
     const kind: TelegramNotification["kind"] | null =
       today >= dueDate ? "due" : today >= dateOnly(advance) ? "advance" : null;
     if (!kind || data.telegramNotifications.some((item) =>
@@ -55,6 +60,7 @@ export async function POST(request: Request) {
 
     const customer = data.customers.find((item) => item.id === contract.customerId);
     const purpose = paymentPurpose(contract.contractNumber, period);
+    const periodLabel = `${charge.periodStart.split("-").reverse().join(".")}–${charge.periodEnd.split("-").reverse().join(".")}`;
     const button = {
       inline_keyboard: [[{ text: "📎 Отправить квитанцию", callback_data: `receipt:${contract.id}:${period}` }]]
     };
@@ -68,7 +74,8 @@ export async function POST(request: Request) {
           `${kind === "advance" ? "🔔 Напоминание об оплате" : "📅 Сегодня срок оплаты"}\n\n` +
           `Договор: <b>${html(contract.contractNumber)}</b>\n` +
           `Арендатор: ${html(customer?.fullName ?? "")}\n` +
-          `Сумма: <b>${html(money(contract.monthlyRate))}</b>\n` +
+          `Период: <b>${periodLabel}</b>\n` +
+          `Сумма: <b>${html(money(charge.amount))}</b>\n` +
           `Получатель: ${html(profile.fullName)}\n` +
           `Банк: <b>${html(profile.bankName)}</b>\n` +
           `Номер карты: <code>${html(profile.cardNumber)}</code>\n` +
@@ -77,7 +84,7 @@ export async function POST(request: Request) {
         );
       } else {
         if (!data.paymentSettings) throw new Error("Не заполнены банковские реквизиты ИП");
-        const payload = buildPaymentQrPayload(data.paymentSettings, contract.monthlyRate, purpose);
+        const payload = buildPaymentQrPayload(data.paymentSettings, charge.amount, purpose);
         const qr = await QRCode.toBuffer(payload, {
           width: 650, margin: 4, errorCorrectionLevel: "L",
           color: { dark: "#000000", light: "#ffffff" }
@@ -88,7 +95,8 @@ export async function POST(request: Request) {
           qr,
           `${kind === "advance" ? "🔔 Напоминание об оплате" : "📅 Сегодня срок оплаты"}\n\n` +
           `Договор: <b>${html(contract.contractNumber)}</b>\n` +
-          `Сумма: <b>${html(money(contract.monthlyRate))}</b>\n` +
+          `Период: <b>${periodLabel}</b>\n` +
+          `Сумма: <b>${html(money(charge.amount))}</b>\n` +
           `Назначение: ${html(purpose)}\n\nОтсканируйте QR банковским приложением. После оплаты нажмите кнопку и пришлите квитанцию.`,
           button
         );
@@ -109,7 +117,7 @@ export async function POST(request: Request) {
       } else {
         data.paymentRequests.push({
           id: Math.max(0, ...data.paymentRequests.map((item) => item.id)) + 1,
-          contractId: contract.id, period, amount: contract.monthlyRate, purpose,
+          contractId: contract.id, period, amount: charge.amount, purpose,
           recipientEmail: `telegram:${binding.chatId}`, status: "sent", createdAt: now.toISOString()
         });
       }

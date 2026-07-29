@@ -37,6 +37,9 @@ export interface Contract {
   endDate: string; monthlyRate: number; depositAmount: number; billingDay: number;
   status: ContractStatus; terminationReason: string; note: string;
   landlordType?: LandlordType;
+  paymentIntervalMonths?: 1 | 3 | 6 | 12;
+  firstPaymentDate?: string;
+  advanceNoticeDays?: number;
 }
 export interface Charge {
   id: number; contractId: number; periodStart: string; periodEnd: string; dueDate: string;
