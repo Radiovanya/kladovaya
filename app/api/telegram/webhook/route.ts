@@ -217,13 +217,25 @@ export async function POST(request: Request) {
         Bucket: documentsBucket, Key: key, Body: encrypted.body, ContentType: "application/octet-stream",
         Metadata: { originalname: encodeURIComponent(fileName), ...encrypted.metadata }
       }));
+      const reference = `TG-${update.update_id}`;
+      const charge = ensureReceiptCharge(data, pending.contractId, pending.period);
+      const contract = data.contracts.find((item) => item.id === pending.contractId)!;
+      let payment = data.payments.find((item) => item.chargeId === charge.id && item.status === "pending_verification");
+      if (!payment) {
+        payment = {
+          id: nextId(data.payments), customerId: contract.customerId, contractId: contract.id, chargeId: charge.id,
+          paymentDate: new Date().toISOString().slice(0, 10), amount: charge.amount,
+          paymentMethod: contract.landlordType === "individual" ? "card" : "bank_transfer",
+          referenceNumber: reference, comment: "Квитанция получена через Telegram, ожидает проверки сотрудником",
+          status: "pending_verification"
+        };
+        data.payments.push(payment);
+      }
       data.documents.push({
-        id: nextId(data.documents), entityType: "contract", entityId: pending.contractId,
+        id: nextId(data.documents), entityType: "payment", entityId: payment.id,
         fileName, fileUrl: `/api/documents?key=${encodeURIComponent(key)}`,
         documentType: "receipt", mimeType, fileSize: content.length, uploadedAt: new Date().toISOString()
       } satisfies DocumentItem);
-      const reference = `TG-${update.update_id}`;
-      ensureReceiptCharge(data, pending.contractId, pending.period);
       receiptTask(data, pending.contractId, pending.period, reference);
       data.telegramPendingReceipts = data.telegramPendingReceipts.filter((item) => item !== pending);
       changed = true;

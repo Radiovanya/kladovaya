@@ -4,7 +4,9 @@ export const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
 
 export function chargePaidAmount(chargeId: number, data: Pick<AppData, "payments">) {
-  return data.payments.filter((payment) => payment.chargeId === chargeId).reduce((sum, payment) => sum + payment.amount, 0);
+  return data.payments
+    .filter((payment) => payment.chargeId === chargeId && payment.status !== "pending_verification")
+    .reduce((sum, payment) => sum + payment.amount, 0);
 }
 
 export function calculateChargeStatus(

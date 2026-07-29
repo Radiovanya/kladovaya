@@ -46,6 +46,7 @@ export interface Payment {
   id: number; customerId: number; contractId: number; chargeId: number | null; paymentDate: string;
   amount: number; paymentMethod: "cash" | "bank_transfer" | "sbp" | "card" | "other";
   referenceNumber: string; comment: string;
+  status?: "pending_verification" | "confirmed";
 }
 export interface Task {
   id: number; title: string; description: string; dueDate: string; priority: "low" | "medium" | "high";

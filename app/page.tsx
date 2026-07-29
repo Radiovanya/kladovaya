@@ -51,7 +51,8 @@ const statusText: Record<string, string> = {
   free: "Свободна", reserved: "Зарезервирована", occupied: "Занята", maintenance: "В ремонте", archived: "Архив",
   draft: "Черновик", active: "Активен", expired: "Истёк", terminated: "Расторгнут",
   pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
-  open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово"
+  open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово",
+  pending_verification: "На проверке", confirmed: "Подтверждено"
 };
 const date = (value: string) => new Intl.DateTimeFormat("ru-RU").format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
 const isoToday = () => new Date().toISOString().slice(0, 10);
@@ -208,12 +209,16 @@ export default function Home() {
           amount: charge.amount,
           paymentMethod: contract.landlordType === "individual" ? "card" : "bank_transfer",
           referenceNumber: task.description.match(/TG-\d+/)?.[0] ?? "",
-          comment: receipt ? "Подтверждено сотрудником по квитанции из Telegram" : "Подтверждено сотрудником вручную"
+          comment: receipt ? "Подтверждено сотрудником по квитанции из Telegram" : "Подтверждено сотрудником вручную",
+          status: "confirmed"
         });
         if (receipt) {
           receipt.entityType = "payment";
           receipt.entityId = paymentId;
         }
+      } else {
+        existingPayment.status = "confirmed";
+        existingPayment.comment = "Подтверждено сотрудником по квитанции из Telegram";
       }
       charge.status = "paid";
       next.tasks
@@ -597,8 +602,8 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
       return { id: x.id, customerId: contract.customerId, cells: [<strong key="n">{contract.contractNumber}</strong>, data.customers.find((c) => c.id === contract.customerId)?.fullName, `${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))] };
     });
   } else if (page === "payments") {
-    headers = ["Дата", "Клиент", "Договор", "Способ", "Номер", "Сумма"];
-    rows = data.payments.filter((x) => cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <strong key="n">{data.customers.find((c) => c.id === x.customerId)?.fullName}</strong>, data.contracts.find((c) => c.id === x.contractId)?.contractNumber, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>] }));
+    headers = ["Дата", "Клиент", "Договор", "Способ", "Номер", "Сумма", "Статус"];
+    rows = data.payments.filter((x) => cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <strong key="n">{data.customers.find((c) => c.id === x.customerId)?.fullName}</strong>, data.contracts.find((c) => c.id === x.contractId)?.contractNumber, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>, badge(x.status ?? "confirmed")] }));
   } else if (page === "tasks") {
     headers = ["Задача", "Срок", "Приоритет", "Статус"];
     rows = data.tasks.filter((x) => cell(x.title)).map((x) => {
@@ -684,7 +689,7 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
         </div>
         {tab === "contracts" && <SimpleTable headers={["Договор", "Объект", "Период", "Ставка", "Статус"]} rows={contracts.map((x) => [<strong key="contract">{x.contractNumber}</strong>, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)])} onRowClick={(index) => onContractDocument(contracts[index].id)} />}
         {tab === "charges" && <SimpleTable headers={["Период", "Срок", "Сумма", "Оплачено", "Статус"]} rows={charges.map((x) => [`${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))])} />}
-        {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="amount">{money(x.amount)}</strong>])} onRowClick={(index) => onPayment(payments[index].id)} />}
+        {tab === "payments" && <SimpleTable headers={["Дата", "Способ", "Номер", "Сумма", "Статус"]} rows={payments.map((x) => [date(x.paymentDate), methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="amount">{money(x.amount)}</strong>, badge(x.status ?? "confirmed")])} onRowClick={(index) => onPayment(payments[index].id)} />}
         {tab === "documents" && <SimpleTable headers={["Файл", "Тип"]} rows={documents.map((x) => [
           x.fileUrl.startsWith("/api/documents?key=")
             ? <a key="file" href={x.fileUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{x.fileName}</a>
@@ -1302,6 +1307,7 @@ function PaymentDetailsModal({ paymentId, data, onClose }: { paymentId: number; 
           <div><span>Объект</span><strong>{unit ? `${unit.unitNumber}${location ? ` · ${location.address}` : ""}` : "Не указан"}</strong></div>
           <div><span>Способ оплаты</span><strong>{methodName(payment.paymentMethod)}</strong></div>
           <div><span>Номер операции</span><strong>{payment.referenceNumber || "Не указан"}</strong></div>
+          <div><span>Статус проверки</span>{badge(payment.status ?? "confirmed")}</div>
         </div>
 
         <section className="payment-source">
@@ -1388,7 +1394,7 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
       } else if (modal.type === "charges") upsert(next.charges, { id: modal.id ?? nextId(next.charges), contractId: Number(input(form, "contractId")), periodStart: input(form, "periodStart"), periodEnd: input(form, "periodEnd"), dueDate: input(form, "dueDate"), amount: Number(input(form, "amount")), chargeType: input(form, "chargeType") as "rent", status: (editing?.status as "pending" | undefined) ?? "pending", note: input(form, "note") });
       else if (modal.type === "payments") {
         const chargeId = input(form, "chargeId");
-        upsert(next.payments, { id: modal.id ?? nextId(next.payments), customerId: Number(input(form, "customerId")), contractId: Number(input(form, "contractId")), chargeId: chargeId ? Number(chargeId) : null, paymentDate: input(form, "paymentDate"), amount: Number(input(form, "amount")), paymentMethod: input(form, "paymentMethod") as "sbp", referenceNumber: input(form, "referenceNumber"), comment: input(form, "comment") });
+        upsert(next.payments, { id: modal.id ?? nextId(next.payments), customerId: Number(input(form, "customerId")), contractId: Number(input(form, "contractId")), chargeId: chargeId ? Number(chargeId) : null, paymentDate: input(form, "paymentDate"), amount: Number(input(form, "amount")), paymentMethod: input(form, "paymentMethod") as "sbp", referenceNumber: input(form, "referenceNumber"), comment: input(form, "comment"), status: (editing?.status as "pending_verification" | "confirmed" | undefined) ?? "confirmed" });
         if (chargeId) {
           const charge = next.charges.find((item) => item.id === Number(chargeId))!;
           charge.status = calculateChargeStatus(charge.amount, chargePaidAmount(charge.id, next), charge.dueDate, new Date("2026-07-19"));
