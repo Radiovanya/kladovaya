@@ -131,7 +131,7 @@ export interface PurchaseObjectDetails {
 }
 export interface PurchaseDeal {
   id: number;
-  unitId: number;
+  unitId: number | null;
   buyerId: number;
   seller: PurchaseSeller;
   objectDetails: PurchaseObjectDetails;

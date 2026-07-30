@@ -796,7 +796,7 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
   const deals = data.purchaseDeals ?? [];
   const [tab, setTab] = useState<"contract" | "registry" | "buyers">("contract");
   const [buyerId, setBuyerId] = useState(buyers[0]?.id ?? 0);
-  const [unitId, setUnitId] = useState(data.units[0]?.id ?? 0);
+  const [unitId, setUnitId] = useState(0);
   const [error, setError] = useState("");
   const [dealFormKey, setDealFormKey] = useState(0);
   const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
@@ -848,9 +848,7 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
     const form = new FormData(event.currentTarget);
     const buyer = buyers.find((item) => item.id === Number(form.get("buyerId")));
     const selectedUnit = data.units.find((item) => item.id === Number(form.get("unitId")));
-    const location = data.locations.find((item) => item.id === selectedUnit?.locationId);
     if (!buyer) { setError("Сначала сохраните и выберите покупателя"); return; }
-    if (!selectedUnit || !location) { setError("Выберите объект с корректным адресом"); return; }
     const seller: PurchaseSeller = {
       ...emptySeller(),
       fullName: String(form.get("sellerFullName") ?? "").trim(),
@@ -887,7 +885,7 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
     const paymentTerms = String(form.get("paymentTerms") ?? "").trim();
     const additionalTerms = String(form.get("additionalTerms") ?? "").trim();
     const deal: PurchaseDeal = {
-      id: nextId(deals), unitId: selectedUnit.id, buyerId: buyer.id, seller, objectDetails, dealDate, price,
+      id: nextId(deals), unitId: selectedUnit?.id ?? null, buyerId: buyer.id, seller, objectDetails, dealDate, price,
       contractNumber, paymentTerms, additionalTerms,
       generatedDocument: generatePurchaseContract({
         contractNumber, buyer, seller, objectDetails, dealDate, price, paymentTerms, additionalTerms
@@ -897,10 +895,12 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
     const next = structuredClone(data);
     next.purchaseDeals ??= [];
     next.purchaseDeals.push(deal);
-    next.unitOperatingCosts ??= [];
-    const cost = next.unitOperatingCosts.find((item) => item.unitId === selectedUnit.id);
-    if (cost) { cost.purchasePrice = price; cost.updatedAt = new Date().toISOString(); }
-    else next.unitOperatingCosts.push({ unitId: selectedUnit.id, purchasePrice: price, monthlyPayment: 0, annualMembershipFees: 0, annualAdditionalExpenses: 0, updatedAt: new Date().toISOString() });
+    if (selectedUnit) {
+      next.unitOperatingCosts ??= [];
+      const cost = next.unitOperatingCosts.find((item) => item.unitId === selectedUnit.id);
+      if (cost) { cost.purchasePrice = price; cost.updatedAt = new Date().toISOString(); }
+      else next.unitOperatingCosts.push({ unitId: selectedUnit.id, purchasePrice: price, monthlyPayment: 0, annualMembershipFees: 0, annualAdditionalExpenses: 0, updatedAt: new Date().toISOString() });
+    }
     onSave(next, "Договор сформирован и сделка добавлена в реестр");
     setDealFormKey((value) => value + 1);
     onOpenDeal(deal.id);
@@ -942,20 +942,20 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
         {!buyers.length && <div className="scan-limit-note">Сначала откройте вкладку «Покупатели» и сохраните хотя бы одного покупателя.</div>}
         <div className="form-grid">
           <Select name="buyerId" label="Покупатель" options={buyers.map((buyer) => [buyer.id, `${buyer.label} · ${buyer.fullName}`])} defaultValue={String(buyerId || buyers[0]?.id || "")} />
-          <label>Объект<select name="unitId" value={unitId} onChange={(event) => setUnitId(Number(event.target.value))}>{data.units.map((item) => { const location = data.locations.find((row) => row.id === item.locationId); return <option key={item.id} value={item.id}>№ {item.unitNumber} · {location?.address}</option>; })}</select></label>
+          <label>Объект<select name="unitId" value={unitId} onChange={(event) => setUnitId(Number(event.target.value))}><option value={0}>Новый объект — ещё не поставлен на учёт</option>{data.units.map((item) => { const location = data.locations.find((row) => row.id === item.locationId); return <option key={item.id} value={item.id}>Из базы: № {item.unitNumber} · {location?.address}</option>; })}</select></label>
           <Field name="dealDate" label="Дата сделки" type="date" required defaultValue={isoToday()} />
           <Field name="contractNumber" label="Номер договора" defaultValue={nextPurchaseContractNumber(deals, isoToday())} />
           <Field key={`purchase-price-${unitId}`} name="price" label="Цена объекта, ₽" type="number" required defaultValue={String(costs?.purchasePrice || "")} />
-          <Field key={`object-type-${unitId}`} name="objectType" label="Вид объекта" required defaultValue={unit ? unitTypeName(unit.unitType).toLocaleLowerCase("ru") : "кладовка"} />
-          <Field name="objectPurpose" label="Назначение" required defaultValue="Нежилое помещение" />
+          <Field key={`object-type-${unitId}`} name="objectType" label="Вид объекта" required defaultValue={unit ? unitTypeName(unit.unitType).toLocaleLowerCase("ru") : ""} />
+          <Field key={`object-purpose-${unitId}`} name="objectPurpose" label="Назначение" required defaultValue={unit ? "Нежилое помещение" : ""} />
           <Field key={`object-area-${unitId}`} name="objectAreaSqm" label="Площадь, м²" type="number" required defaultValue={String(unit?.areaSqm ?? "")} />
           <Field key={`object-number-${unitId}`} name="objectNumber" label="Номер объекта" required defaultValue={unit?.unitNumber ?? ""} />
           <Field key={`object-address-${unitId}`} name="objectAddress" label="Полный адрес объекта" required wide defaultValue={data.locations.find((item) => item.id === unit?.locationId)?.address ?? ""} />
-          <Field name="cadastralNumber" label="Кадастровый номер" required wide />
-          <Field name="ownershipBasis" label="Основание права собственности продавца" required wide />
-          <Field name="ownershipRegistrationDate" label="Дата регистрации права" type="date" required />
-          <Field name="ownershipRegistrationNumber" label="Номер регистрации права" required wide />
-          <Field name="restrictions" label="Ограничения / обременения" wide defaultValue="Не зарегистрированы" />
+          <Field key={`cadastral-${unitId}`} name="cadastralNumber" label="Кадастровый номер" required wide />
+          <Field key={`ownership-basis-${unitId}`} name="ownershipBasis" label="Основание права собственности продавца" required wide />
+          <Field key={`ownership-date-${unitId}`} name="ownershipRegistrationDate" label="Дата регистрации права" type="date" required />
+          <Field key={`ownership-number-${unitId}`} name="ownershipRegistrationNumber" label="Номер регистрации права" required wide />
+          <Field key={`restrictions-${unitId}`} name="restrictions" label="Ограничения / обременения" wide defaultValue="Не зарегистрированы" />
           <Field name="paymentTerms" label="Порядок расчётов" wide defaultValue="Полная оплата в день подписания договора" />
           <Field name="additionalTerms" label="Дополнительные условия" wide />
         </div>
@@ -984,7 +984,7 @@ function PurchasesPage({ data, onSave, onOpenDeal }: {
           const dealUnit = data.units.find((item) => item.id === deal.unitId);
           const location = data.locations.find((item) => item.id === dealUnit?.locationId);
           const buyer = buyers.find((item) => item.id === deal.buyerId);
-          return [date(deal.dealDate), `№ ${dealUnit?.unitNumber ?? "—"}`, location?.address ?? "—", buyer?.fullName ?? "Удалён", deal.seller.fullName, money(deal.price), deal.contractNumber];
+          return [date(deal.dealDate), `№ ${dealUnit?.unitNumber ?? deal.objectDetails?.objectNumber ?? "—"}`, location?.address ?? deal.objectDetails?.address ?? "—", buyer?.fullName ?? "Удалён", deal.seller.fullName, money(deal.price), deal.contractNumber];
         })}
         onRowClick={(index) => onOpenDeal([...deals].sort((a, b) => b.dealDate.localeCompare(a.dealDate))[index].id)} />
     </section>}
