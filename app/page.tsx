@@ -592,25 +592,39 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
     headers = ["Номер", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
     rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
   } else if (page === "customers") {
-    headers = ["ФИО", "Телефон", "Email", "Договор", "Задолженность"];
+    headers = ["ФИО", "Телефон", "Email", "Кладовая", "Задолженность"];
     rows = data.customers.filter((x) => cell(x.fullName) || cell(x.phone) || cell(x.email)).map((x) => {
       const contracts = data.contracts.filter((c) => c.customerId === x.id);
+      const activeContract = contracts.find((c) => c.status === "active");
+      const activeUnit = data.units.find((unit) => unit.id === activeContract?.unitId);
+      const activeLocation = data.locations.find((location) => location.id === activeUnit?.locationId);
       const ids = contracts.map((c) => c.id);
       const debt = data.charges.filter((c) => ids.includes(c.contractId) && effectiveChargeStatus(c.id, data, new Date("2026-07-19")) === "overdue").reduce((sum, c) => sum + c.amount - chargePaidAmount(c.id, data), 0);
-      return { id: x.id, customerId: x.id, cells: [<strong key="n">{x.fullName}</strong>, x.phone, x.email, contracts.find((c) => c.status === "active")?.contractNumber ?? "—", <strong className={debt ? "danger-text" : ""} key="d">{money(debt)}</strong>] };
+      return { id: x.id, customerId: x.id, cells: [<strong key="n">{x.fullName}</strong>, x.phone, x.email, activeUnit ? <span className="entity-info-cell" key="unit"><strong>№ {activeUnit.unitNumber}</strong><small>{activeLocation?.name ?? activeLocation?.address ?? "Локация не указана"}</small></span> : "—", <strong className={debt ? "danger-text" : ""} key="d">{money(debt)}</strong>] };
     });
   } else if (page === "contracts") {
     headers = ["Договор", "Клиент", "Объект", "Период", "Ставка", "Статус"];
     rows = data.contracts.filter((x) => cell(x.contractNumber) || cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [<strong key="n">{x.contractNumber}</strong>, data.customers.find((c) => c.id === x.customerId)?.fullName, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)] }));
   } else if (page === "charges") {
-    headers = ["Договор", "Клиент", "Период", "Срок", "Сумма", "Оплачено", "Статус"];
-    rows = data.charges.filter((x) => cell(data.contracts.find((c) => c.id === x.contractId)?.contractNumber)).map((x) => {
+    headers = ["Объект · договор · плательщик", "Период", "Срок", "Сумма", "Оплачено", "Статус"];
+    rows = data.charges.filter((x) => {
+      const contract = data.contracts.find((c) => c.id === x.contractId);
+      const unit = data.units.find((item) => item.id === contract?.unitId);
+      const customer = data.customers.find((item) => item.id === contract?.customerId);
+      return cell(contract?.contractNumber) || cell(unit?.unitNumber) || cell(customer?.fullName);
+    }).map((x) => {
       const contract = data.contracts.find((c) => c.id === x.contractId)!;
-      return { id: x.id, customerId: contract.customerId, cells: [<strong key="n">{contract.contractNumber}</strong>, data.customers.find((c) => c.id === contract.customerId)?.fullName, `${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))] };
+      const unit = data.units.find((item) => item.id === contract.unitId);
+      const location = data.locations.find((item) => item.id === unit?.locationId);
+      const customer = data.customers.find((item) => item.id === contract.customerId);
+      return { id: x.id, customerId: contract.customerId, cells: [<span className="entity-info-cell" key="info"><strong>№ {unit?.unitNumber ?? "—"} · {contract.contractNumber}</strong><small>{location?.name ?? location?.address ?? "Локация не указана"} · {customer?.fullName ?? "Плательщик не найден"}</small></span>, `${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))] };
     });
   } else if (page === "payments") {
-    headers = ["Дата", "Клиент", "Договор", "Способ", "Номер", "Сумма", "Статус"];
-    rows = data.payments.filter((x) => cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <strong key="n">{data.customers.find((c) => c.id === x.customerId)?.fullName}</strong>, data.contracts.find((c) => c.id === x.contractId)?.contractNumber, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>, badge(x.status ?? "confirmed")] }));
+    headers = ["Дата", "Кладовая", "Плательщик · договор", "Способ", "Номер", "Сумма", "Статус"];
+    rows = data.payments.filter((x) => { const contract = data.contracts.find((c) => c.id === x.contractId); const unit = data.units.find((item) => item.id === contract?.unitId); return cell(data.customers.find((c) => c.id === x.customerId)?.fullName) || cell(unit?.unitNumber); }).map((x) => {
+      const contract = data.contracts.find((c) => c.id === x.contractId); const unit = data.units.find((item) => item.id === contract?.unitId); const location = data.locations.find((item) => item.id === unit?.locationId); const customer = data.customers.find((c) => c.id === x.customerId);
+      return { id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <span className="entity-info-cell" key="unit"><strong>№ {unit?.unitNumber ?? "—"}</strong><small>{location?.name ?? location?.address ?? "Локация не указана"}</small></span>, <span className="entity-info-cell" key="payer"><strong>{customer?.fullName ?? "—"}</strong><small>{contract?.contractNumber ?? "Договор не найден"}</small></span>, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>, badge(x.status ?? "confirmed")] };
+    });
   } else if (page === "tasks") {
     headers = ["Задача", "Срок", "Приоритет", "Статус"];
     rows = data.tasks.filter((x) => cell(x.title)).map((x) => {
@@ -667,6 +681,8 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
   const contracts = data.contracts.filter((item) => item.customerId === customerId);
   const contractIds = contracts.map((item) => item.id);
   const active = contracts.find((item) => item.status === "active");
+  const activeUnit = data.units.find((unit) => unit.id === active?.unitId);
+  const activeLocation = data.locations.find((location) => location.id === activeUnit?.locationId);
   const charges = data.charges.filter((item) => contractIds.includes(item.contractId));
   const payments = data.payments.filter((item) => item.customerId === customerId);
   const documents = data.documents.filter((item) => item.entityType === "customer" && item.entityId === customerId || item.entityType === "contract" && contractIds.includes(item.entityId));
@@ -679,8 +695,8 @@ function CustomerDetails({ data, customerId, tab, setTab, onBack, onAdd, onQr, o
     <section>
       <button className="back-button" onClick={onBack}>← Назад к клиентам</button>
       <div className="summary-grid">
-        <div><span>Текущий договор</span><strong>{active?.contractNumber ?? "Нет"}</strong></div>
-        <div><span>Объект</span><strong>{active ? data.units.find((unit) => unit.id === active.unitId)?.unitNumber : "—"}</strong></div>
+        <div><span>Кладовая</span><strong>{activeUnit ? `№ ${activeUnit.unitNumber}` : "Не назначена"}</strong><small>{activeLocation?.name ?? activeLocation?.address ?? "Локация не указана"}</small></div>
+        <div><span>Арендная ставка</span><strong>{active ? money(active.monthlyRate) : "—"}</strong></div>
         <div><span>Статус аренды</span>{badge(active ? "active" : "expired")}</div>
         <div><span>Задолженность</span><strong className={debt ? "danger-text" : ""}>{money(debt)}</strong></div>
       </div>
@@ -1625,17 +1641,31 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   const editing = modal.id ? collection.find((item) => item.id === modal.id) as unknown as Record<string, unknown> | undefined : undefined;
   const value = (key: string, fallback = "") => String(editing?.[key] ?? fallback);
   const editingPayment = modal.type === "payments" && editing ? editing : undefined;
+  const initialPaymentContract = data.contracts.find((item) => item.id === Number(editingPayment?.contractId)) ?? data.contracts.find((item) => item.status === "active") ?? data.contracts[0];
   const [error, setError] = useState("");
-  const [customerId, setCustomerId] = useState(Number(editingPayment?.customerId ?? data.customers[0]?.id ?? 0));
-  const [contractId, setContractId] = useState(Number(editingPayment?.contractId ?? data.contracts.find((c) => c.status === "active")?.id ?? 0));
+  const [customerId, setCustomerId] = useState(Number(editingPayment?.customerId ?? initialPaymentContract?.customerId ?? data.customers[0]?.id ?? 0));
+  const [contractId, setContractId] = useState(Number(initialPaymentContract?.id ?? 0));
+  const [paymentUnitId, setPaymentUnitId] = useState(Number(initialPaymentContract?.unitId ?? 0));
   const [rentalUnitId, setRentalUnitId] = useState(Number(editing?.unitId ?? data.units.find((unit) => unitStatus(unit.id, data) === "free")?.id ?? data.units[0]?.id ?? 0));
   const contract = data.contracts.find((item) => item.id === contractId);
+  const paymentUnit = data.units.find((item) => item.id === paymentUnitId);
+  const paymentLocation = data.locations.find((item) => item.id === paymentUnit?.locationId);
+  const paymentCustomer = data.customers.find((item) => item.id === customerId);
+  const paymentUnits = data.units.filter((unit) => data.contracts.some((item) => item.unitId === unit.id));
   const rentalUnit = data.units.find((item) => item.id === rentalUnitId);
   const input = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
   const upsert = <T extends { id: number }>(rows: T[], record: T) => {
     const index = rows.findIndex((item) => item.id === record.id);
     if (index >= 0) rows[index] = record; else rows.push(record);
   };
+  function selectPaymentUnit(unitId: number) {
+    setPaymentUnitId(unitId);
+    const unitContracts = data.contracts.filter((item) => item.unitId === unitId).sort((a, b) => b.startDate.localeCompare(a.startDate));
+    const selectedContract = unitContracts.find((item) => item.status === "active") ?? unitContracts[0];
+    if (!selectedContract) return;
+    setContractId(selectedContract.id);
+    setCustomerId(selectedContract.customerId);
+  }
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError("");
     const form = new FormData(event.currentTarget);
@@ -1705,7 +1735,16 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
           {modal.type === "customers" && <><Field name="fullName" label="ФИО" required defaultValue={value("fullName")} /><Field name="phone" label="Телефон" required defaultValue={value("phone")} /><Field name="email" label="Email" type="email" defaultValue={value("email")} /><Field name="registration" label="Паспорт / регистрационные данные" wide defaultValue={value("passportOrRegistrationData")} /><Field name="taxId" label="ИНН" defaultValue={value("taxId")} /><Field name="address" label="Адрес" defaultValue={value("address")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "contracts" && <><Select name="customerId" label="Клиент" options={data.customers.map((x) => [x.id, x.fullName])} defaultValue={value("customerId")} /><label>Объект<select name="unitId" value={rentalUnitId} onChange={(event) => setRentalUnitId(Number(event.target.value))}>{data.units.filter((x) => x.id === Number(editing?.unitId) || unitStatus(x.id, data) === "free").map((x) => <option key={x.id} value={x.id}>{x.unitNumber} · {unitTypeName(x.unitType)} · {money(x.monthlyRate)}</option>)}</select></label><Field name="contractNumber" label="Номер договора" required readOnly defaultValue={value("contractNumber", nextContractNumber(data.contracts))} /><Select name="status" label="Статус" options={[["active", "Активен"], ["draft", "Черновик"]]} defaultValue={value("status")} /><Select name="landlordType" label="Получатель оплаты" options={[["entrepreneur", "ИП / юридическое лицо — QR"], ["individual", "Физическое лицо — карта"]]} defaultValue={value("landlordType", "entrepreneur")} /><Field name="startDate" label="Дата начала" type="date" required defaultValue={value("startDate", isoToday())} /><Field name="endDate" label="Дата окончания" type="date" required defaultValue={value("endDate", "2027-07-18")} /><Field key={`rate-${rentalUnitId}`} name="monthlyRate" label="Ставка за месяц, ₽" type="number" required defaultValue={value("monthlyRate", String(rentalUnit?.monthlyRate ?? ""))} /><Field key={`deposit-${rentalUnitId}`} name="depositAmount" label="Депозит, ₽" type="number" defaultValue={value("depositAmount", String(rentalUnit?.depositAmount ?? ""))} /><Select name="paymentIntervalMonths" label="Периодичность оплаты" options={[[1, "Ежемесячно"], [3, "Раз в квартал"], [6, "Раз в полгода"], [12, "Раз в год"]]} defaultValue={value("paymentIntervalMonths", "1")} /><Field name="firstPaymentDate" label="Дата первого платежа" type="date" required defaultValue={value("firstPaymentDate", value("startDate", isoToday()))} /><Field name="advanceNoticeDays" label="Уведомить заранее, дней" type="number" defaultValue={value("advanceNoticeDays", "3")} /><Field name="billingDay" label="День оплаты (для старых договоров)" type="number" defaultValue={value("billingDay", "5")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "charges" && <><Select name="contractId" label="Активный договор" options={data.contracts.filter((x) => x.status === "active").map((x) => [x.id, x.contractNumber])} defaultValue={value("contractId")} /><Select name="chargeType" label="Тип" options={[["rent", "Аренда"], ["deposit", "Депозит"], ["penalty", "Пени"], ["other", "Другое"]]} defaultValue={value("chargeType")} /><Field name="periodStart" label="Начало периода" type="date" required defaultValue={value("periodStart", "2026-08-01")} /><Field name="periodEnd" label="Конец периода" type="date" required defaultValue={value("periodEnd", "2026-08-31")} /><Field name="dueDate" label="Срок оплаты" type="date" required defaultValue={value("dueDate", "2026-08-05")} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
-          {modal.type === "payments" && <><label>Клиент<select name="customerId" value={customerId} onChange={(e) => { const id = Number(e.target.value); setCustomerId(id); const c = data.contracts.find((x) => x.customerId === id && x.status === "active"); if (c) setContractId(c.id); }}>{data.customers.map((x) => <option value={x.id} key={x.id}>{x.fullName}</option>)}</select></label><label>Договор<select name="contractId" value={contractId} onChange={(e) => setContractId(Number(e.target.value))}>{data.contracts.filter((x) => x.customerId === customerId).map((x) => <option value={x.id} key={x.id}>{x.contractNumber}</option>)}</select></label><Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} /><Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} /></>}
+          {modal.type === "payments" && <>
+            <label className="wide">Кладовая / объект<select value={paymentUnitId} onChange={(event) => selectPaymentUnit(Number(event.target.value))} required>{paymentUnits.map((unit) => { const location = data.locations.find((item) => item.id === unit.locationId); return <option value={unit.id} key={unit.id}>№ {unit.unitNumber} · {location?.name ?? location?.address ?? "Локация не указана"}</option>; })}</select></label>
+            <input type="hidden" name="customerId" value={customerId} />
+            <input type="hidden" name="contractId" value={contractId} />
+            <Field name="payerDisplay" label="Плательщик" readOnly defaultValue={paymentCustomer?.fullName ?? ""} />
+            <Field name="contractDisplay" label="Договор" readOnly defaultValue={contract?.contractNumber ?? ""} />
+            <div className="wide selected-object-note"><strong>Выбран объект № {paymentUnit?.unitNumber ?? "—"}</strong><small>{paymentLocation?.address ?? "Адрес не указан"}. Плательщик и договор подставлены автоматически.</small></div>
+            <Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} />
+            <Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} />
+          </>}
           {modal.type === "tasks" && <><Field name="title" label="Название" required wide defaultValue={value("title")} /><Field name="dueDate" label="Срок" type="datetime-local" required defaultValue={value("dueDate")} /><Select name="priority" label="Приоритет" options={[["low", "Низкий"], ["medium", "Средний"], ["high", "Высокий"]]} defaultValue={value("priority")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
           {modal.type === "documents" && <><Field name="fileName" label="Название файла" required wide /><Select name="documentType" label="Тип документа" options={[["contract_scan", "Скан договора"], ["receipt", "Квитанция"], ["invoice", "Счёт"], ["other", "Другое"]]} /></>}
           {modal.type === "users" && <><Field name="name" label="Имя" required defaultValue={value("name")} /><Field name="email" label="Email" type="email" required defaultValue={value("email")} /><Select name="role" label="Роль" options={[["Admin", "Admin"], ["Manager", "Manager"], ["Accountant", "Accountant"]]} defaultValue={value("role")} /></>}

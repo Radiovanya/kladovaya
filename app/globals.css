@@ -163,6 +163,13 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .summary-grid > div { background: var(--surface); padding: 15px; min-height: 74px; display: grid; align-content: center; gap: 7px; }
 .summary-grid span:first-child { font-size: 10px; color: var(--muted); }
 .summary-grid strong { font-size: 13px; }
+.summary-grid small { color: var(--muted); font-size: 9px; line-height: 1.35; }
+.entity-info-cell { display: grid; gap: 3px; min-width: 145px; }
+.entity-info-cell strong { font-size: 10px; }
+.entity-info-cell small { color: var(--muted); font-size: 9px; line-height: 1.35; }
+.selected-object-note { border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; display: grid; gap: 4px; background: var(--surface-soft); }
+.selected-object-note strong { font-size: 10px; }
+.selected-object-note small { color: var(--muted); font-size: 9px; line-height: 1.4; }
 .detail-tabs { display: flex; border-bottom: 1px solid var(--border); gap: 20px; }
 .detail-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); padding: 10px 1px; font-size: 11px; cursor: pointer; }
 .detail-tabs button.active { color: var(--text); border-color: var(--primary); }
