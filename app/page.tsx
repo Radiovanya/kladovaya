@@ -1648,9 +1648,10 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   const [paymentUnitId, setPaymentUnitId] = useState(Number(initialPaymentContract?.unitId ?? 0));
   const [rentalUnitId, setRentalUnitId] = useState(Number(editing?.unitId ?? data.units.find((unit) => unitStatus(unit.id, data) === "free")?.id ?? data.units[0]?.id ?? 0));
   const contract = data.contracts.find((item) => item.id === contractId);
+  const paymentCustomerId = contract?.customerId ?? customerId;
   const paymentUnit = data.units.find((item) => item.id === paymentUnitId);
   const paymentLocation = data.locations.find((item) => item.id === paymentUnit?.locationId);
-  const paymentCustomer = data.customers.find((item) => item.id === customerId);
+  const paymentCustomer = data.customers.find((item) => item.id === paymentCustomerId);
   const paymentUnits = data.units.filter((unit) => data.contracts.some((item) => item.unitId === unit.id));
   const rentalUnit = data.units.find((item) => item.id === rentalUnitId);
   const input = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
@@ -1737,9 +1738,9 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
           {modal.type === "charges" && <><Select name="contractId" label="Активный договор" options={data.contracts.filter((x) => x.status === "active").map((x) => [x.id, x.contractNumber])} defaultValue={value("contractId")} /><Select name="chargeType" label="Тип" options={[["rent", "Аренда"], ["deposit", "Депозит"], ["penalty", "Пени"], ["other", "Другое"]]} defaultValue={value("chargeType")} /><Field name="periodStart" label="Начало периода" type="date" required defaultValue={value("periodStart", "2026-08-01")} /><Field name="periodEnd" label="Конец периода" type="date" required defaultValue={value("periodEnd", "2026-08-31")} /><Field name="dueDate" label="Срок оплаты" type="date" required defaultValue={value("dueDate", "2026-08-05")} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Field name="note" label="Примечание" wide defaultValue={value("note")} /></>}
           {modal.type === "payments" && <>
             <label className="wide">Кладовая / объект<select value={paymentUnitId} onChange={(event) => selectPaymentUnit(Number(event.target.value))} required>{paymentUnits.map((unit) => { const location = data.locations.find((item) => item.id === unit.locationId); return <option value={unit.id} key={unit.id}>№ {unit.unitNumber} · {location?.name ?? location?.address ?? "Локация не указана"}</option>; })}</select></label>
-            <input type="hidden" name="customerId" value={customerId} />
+            <input type="hidden" name="customerId" value={paymentCustomerId} />
             <input type="hidden" name="contractId" value={contractId} />
-            <Field key={`payer-${paymentUnitId}-${customerId}`} name="payerDisplay" label="Плательщик" readOnly defaultValue={paymentCustomer?.fullName ?? ""} />
+            <Field key={`payer-${paymentUnitId}-${paymentCustomerId}`} name="payerDisplay" label="Плательщик" readOnly defaultValue={paymentCustomer?.fullName ?? ""} />
             <Field key={`contract-${paymentUnitId}-${contractId}`} name="contractDisplay" label="Договор" readOnly defaultValue={contract?.contractNumber ?? ""} />
             <div className="wide selected-object-note"><strong>Выбран объект № {paymentUnit?.unitNumber ?? "—"}</strong><small>{paymentLocation?.address ?? "Адрес не указан"}. Плательщик и договор подставлены автоматически.</small></div>
             <Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} />
