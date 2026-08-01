@@ -1648,6 +1648,11 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   const [paymentUnitId, setPaymentUnitId] = useState(Number(initialPaymentContract?.unitId ?? 0));
   const initialPaymentUnit = data.units.find((item) => item.id === Number(initialPaymentContract?.unitId ?? 0));
   const [paymentLocationId, setPaymentLocationId] = useState(Number(initialPaymentUnit?.locationId ?? 0));
+  const initialPaymentChargeId = Number(editingPayment?.chargeId ?? data.charges.find((item) => item.contractId === initialPaymentContract?.id && chargePaidAmount(item.id, data) < item.amount)?.id ?? 0);
+  const [paymentAllocationMode, setPaymentAllocationMode] = useState<"single" | "period">("single");
+  const [selectedPaymentChargeId, setSelectedPaymentChargeId] = useState(initialPaymentChargeId);
+  const [paymentPeriodStartId, setPaymentPeriodStartId] = useState(initialPaymentChargeId);
+  const [paymentPeriodEndId, setPaymentPeriodEndId] = useState(initialPaymentChargeId);
   const [rentalUnitId, setRentalUnitId] = useState(Number(editing?.unitId ?? data.units.find((unit) => unitStatus(unit.id, data) === "free")?.id ?? data.units[0]?.id ?? 0));
   const contract = data.contracts.find((item) => item.id === contractId);
   const paymentCustomerId = contract?.customerId ?? customerId;
@@ -1657,6 +1662,17 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
   const paymentUnits = data.units.filter((unit) => data.contracts.some((item) => item.unitId === unit.id));
   const paymentLocations = data.locations.filter((location) => paymentUnits.some((unit) => unit.locationId === location.id));
   const paymentUnitsAtLocation = paymentUnits.filter((unit) => unit.locationId === paymentLocationId);
+  const unpaidPaymentCharges = data.charges
+    .filter((item) => item.contractId === contract?.id && chargePaidAmount(item.id, data) < item.amount)
+    .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+  const periodStartIndex = unpaidPaymentCharges.findIndex((item) => item.id === paymentPeriodStartId);
+  const periodEndIndex = unpaidPaymentCharges.findIndex((item) => item.id === paymentPeriodEndId);
+  const periodFrom = Math.max(0, Math.min(periodStartIndex, periodEndIndex));
+  const periodTo = Math.max(periodStartIndex, periodEndIndex);
+  const selectedPaymentCharges = paymentAllocationMode === "period"
+    ? unpaidPaymentCharges.slice(periodFrom, periodTo + 1)
+    : unpaidPaymentCharges.filter((item) => item.id === selectedPaymentChargeId);
+  const suggestedPaymentAmount = selectedPaymentCharges.reduce((sum, item) => sum + Math.max(0, item.amount - chargePaidAmount(item.id, data)), 0);
   const rentalUnit = data.units.find((item) => item.id === rentalUnitId);
   const input = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
   const upsert = <T extends { id: number }>(rows: T[], record: T) => {
@@ -1672,6 +1688,13 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
     if (!selectedContract) return;
     setContractId(selectedContract.id);
     setCustomerId(selectedContract.customerId);
+    const firstUnpaidCharge = data.charges
+      .filter((item) => item.contractId === selectedContract.id && chargePaidAmount(item.id, data) < item.amount)
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart))[0];
+    const firstChargeId = firstUnpaidCharge?.id ?? 0;
+    setSelectedPaymentChargeId(firstChargeId);
+    setPaymentPeriodStartId(firstChargeId);
+    setPaymentPeriodEndId(firstChargeId);
   }
   function selectPaymentLocation(locationId: number) {
     setPaymentLocationId(locationId);
@@ -1711,24 +1734,30 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
         }
       } else if (modal.type === "charges") upsert(next.charges, { id: modal.id ?? nextId(next.charges), contractId: Number(input(form, "contractId")), periodStart: input(form, "periodStart"), periodEnd: input(form, "periodEnd"), dueDate: input(form, "dueDate"), amount: Number(input(form, "amount")), chargeType: input(form, "chargeType") as "rent", status: (editing?.status as "pending" | undefined) ?? "pending", note: input(form, "note") });
       else if (modal.type === "payments") {
-        const chargeId = input(form, "chargeId");
-        upsert(next.payments, { id: modal.id ?? nextId(next.payments), customerId: Number(input(form, "customerId")), contractId: Number(input(form, "contractId")), chargeId: chargeId ? Number(chargeId) : null, paymentDate: input(form, "paymentDate"), amount: Number(input(form, "amount")), paymentMethod: input(form, "paymentMethod") as "sbp", referenceNumber: input(form, "referenceNumber"), comment: input(form, "comment"), status: (editing?.status as "pending_verification" | "confirmed" | undefined) ?? "confirmed" });
-        if (chargeId) {
-          const charge = next.charges.find((item) => item.id === Number(chargeId))!;
-          charge.status = calculateChargeStatus(charge.amount, chargePaidAmount(charge.id, next), charge.dueDate, new Date("2026-07-19"));
-          if (charge.status === "paid") {
-            const period = charge.periodStart.slice(0, 7);
-            const task = next.tasks.find((item) =>
-              item.relatedEntityType === "contract_payment" &&
-              item.relatedEntityId === charge.contractId &&
-              item.paymentPeriod === period
-            );
-            if (task) task.status = "paid";
-            const request = [...(next.paymentRequests ?? [])].reverse().find((item) =>
-              item.contractId === charge.contractId && item.period === period
-            );
-            if (request) request.status = "paid";
+        const chargeIds = input(form, "chargeIds").split(",").map(Number).filter(Boolean);
+        const paymentAmount = Number(input(form, "amount"));
+        const allocationCharges = chargeIds.map((id) => next.charges.find((item) => item.id === id)).filter((item): item is NonNullable<typeof item> => Boolean(item));
+        const outstandingTotal = allocationCharges.reduce((sum, item) => sum + Math.max(0, item.amount - chargePaidAmount(item.id, next)), 0);
+        if (chargeIds.length > 1 && paymentAmount > outstandingTotal) throw new Error("Сумма оплаты превышает задолженность за выбранный период");
+        let amountLeft = paymentAmount;
+        if (modal.id || chargeIds.length <= 1) {
+          upsert(next.payments, { id: modal.id ?? nextId(next.payments), customerId: Number(input(form, "customerId")), contractId: Number(input(form, "contractId")), chargeId: chargeIds[0] ?? null, paymentDate: input(form, "paymentDate"), amount: paymentAmount, paymentMethod: input(form, "paymentMethod") as "sbp", referenceNumber: input(form, "referenceNumber"), comment: input(form, "comment"), status: (editing?.status as "pending_verification" | "confirmed" | undefined) ?? "confirmed" });
+        } else {
+          for (const charge of allocationCharges) {
+            const allocated = Math.min(amountLeft, Math.max(0, charge.amount - chargePaidAmount(charge.id, next)));
+            if (allocated <= 0) continue;
+            next.payments.push({ id: nextId(next.payments), customerId: Number(input(form, "customerId")), contractId: Number(input(form, "contractId")), chargeId: charge.id, paymentDate: input(form, "paymentDate"), amount: allocated, paymentMethod: input(form, "paymentMethod") as "sbp", referenceNumber: input(form, "referenceNumber"), comment: input(form, "comment"), status: "confirmed" });
+            amountLeft -= allocated;
           }
+        }
+        for (const charge of allocationCharges) {
+          charge.status = calculateChargeStatus(charge.amount, chargePaidAmount(charge.id, next), charge.dueDate, new Date());
+          if (charge.status !== "paid") continue;
+          const period = charge.periodStart.slice(0, 7);
+          const task = next.tasks.find((item) => item.relatedEntityType === "contract_payment" && item.relatedEntityId === charge.contractId && item.paymentPeriod === period);
+          if (task) task.status = "paid";
+          const request = [...(next.paymentRequests ?? [])].reverse().find((item) => item.contractId === charge.contractId && item.period === period);
+          if (request) request.status = "paid";
         }
       } else if (modal.type === "tasks") upsert(next.tasks, { id: modal.id ?? nextId(next.tasks), title: input(form, "title"), description: input(form, "description"), dueDate: input(form, "dueDate"), priority: input(form, "priority") as "medium", status: (editing?.status as TaskStatus | undefined) ?? "open", relatedEntityType: (editing?.relatedEntityType as string | null | undefined) ?? null, relatedEntityId: (editing?.relatedEntityId as number | null | undefined) ?? null, paymentPeriod: editing?.paymentPeriod as string | undefined });
       else if (modal.type === "documents") upsert(next.documents, { id: modal.id ?? nextId(next.documents), entityType: (editing?.entityType as "customer" | undefined) ?? "customer", entityId: Number(editing?.entityId ?? customerId), fileName: input(form, "fileName"), fileUrl: value("fileUrl", "#"), documentType: input(form, "documentType") as "other" });
@@ -1755,8 +1784,14 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
             <Field key={`payer-${paymentUnitId}-${paymentCustomerId}`} name="payerDisplay" label="Плательщик" readOnly defaultValue={paymentCustomer?.fullName ?? ""} />
             <Field key={`contract-${paymentUnitId}-${contractId}`} name="contractDisplay" label="Договор" readOnly defaultValue={contract?.contractNumber ?? ""} />
             <div className="wide selected-object-note"><strong>Выбран объект № {paymentUnit?.unitNumber ?? "—"}</strong><small>{paymentLocation?.address ?? "Адрес не указан"}. Плательщик и договор подставлены автоматически.</small></div>
-            <Select name="chargeId" label="Начисление" options={[["", "Без привязки"], ...data.charges.filter((x) => x.contractId === contract?.id).map((x) => [x.id, `${date(x.periodStart)} · ${money(x.amount)}`] as [number, string])]} defaultValue={value("chargeId")} />
-            <Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount")} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} />
+            {!modal.id && <label>Как учесть оплату<select name="allocationMode" value={paymentAllocationMode} onChange={(event) => setPaymentAllocationMode(event.target.value as "single" | "period")}><option value="single">За один месяц</option><option value="period">За период</option></select></label>}
+            {!modal.id && paymentAllocationMode === "single" && <label>Оплачиваемый месяц<select value={selectedPaymentChargeId} onChange={(event) => setSelectedPaymentChargeId(Number(event.target.value))} required><option value="">Выберите месяц</option>{unpaidPaymentCharges.map((item) => <option value={item.id} key={item.id}>{paymentPeriodLabel(item.periodStart)} · осталось {money(item.amount - chargePaidAmount(item.id, data))}</option>)}</select></label>}
+            {!modal.id && paymentAllocationMode === "period" && <><label>Период с<select value={paymentPeriodStartId} onChange={(event) => setPaymentPeriodStartId(Number(event.target.value))} required>{unpaidPaymentCharges.map((item) => <option value={item.id} key={item.id}>{paymentPeriodLabel(item.periodStart)}</option>)}</select></label><label>Период по<select value={paymentPeriodEndId} onChange={(event) => setPaymentPeriodEndId(Number(event.target.value))} required>{unpaidPaymentCharges.map((item) => <option value={item.id} key={item.id}>{paymentPeriodLabel(item.periodStart)}</option>)}</select></label></>}
+            {modal.id && <label>Начисление<select value={selectedPaymentChargeId} onChange={(event) => setSelectedPaymentChargeId(Number(event.target.value))}><option value="">Без привязки</option>{data.charges.filter((item) => item.contractId === contract?.id).map((item) => <option value={item.id} key={item.id}>{paymentPeriodLabel(item.periodStart)} · {money(item.amount)}</option>)}</select></label>}
+            <input type="hidden" name="chargeIds" value={modal.id ? String(selectedPaymentChargeId || "") : selectedPaymentCharges.map((item) => item.id).join(",")} />
+            {!unpaidPaymentCharges.length && !modal.id && <div className="wide form-success">Все начисления по этому договору уже оплачены</div>}
+            {paymentAllocationMode === "period" && selectedPaymentCharges.length > 0 && <div className="wide selected-object-note"><strong>Будет учтено месяцев: {selectedPaymentCharges.length}</strong><small>Общая сумма периода: {money(suggestedPaymentAmount)}. После сохранения месяцы исчезнут из списка доступных.</small></div>}
+            <Field name="paymentDate" label="Дата" type="date" required defaultValue={value("paymentDate", isoToday())} /><Field key={`amount-${paymentAllocationMode}-${selectedPaymentCharges.map((item) => item.id).join("-")}`} name="amount" label="Сумма, ₽" type="number" required defaultValue={value("amount", String(suggestedPaymentAmount || ""))} /><Select name="paymentMethod" label="Способ" options={[["sbp", "СБП"], ["bank_transfer", "Банковский перевод"], ["cash", "Наличные"], ["card", "Карта"], ["other", "Другое"]]} defaultValue={value("paymentMethod")} /><Field name="referenceNumber" label="Номер операции" defaultValue={value("referenceNumber")} /><Field name="comment" label="Комментарий" wide defaultValue={value("comment")} />
           </>}
           {modal.type === "tasks" && <><Field name="title" label="Название" required wide defaultValue={value("title")} /><Field name="dueDate" label="Срок" type="datetime-local" required defaultValue={value("dueDate")} /><Select name="priority" label="Приоритет" options={[["low", "Низкий"], ["medium", "Средний"], ["high", "Высокий"]]} defaultValue={value("priority")} /><Field name="description" label="Описание" wide defaultValue={value("description")} /></>}
           {modal.type === "documents" && <><Field name="fileName" label="Название файла" required wide /><Select name="documentType" label="Тип документа" options={[["contract_scan", "Скан договора"], ["receipt", "Квитанция"], ["invoice", "Счёт"], ["other", "Другое"]]} /></>}
