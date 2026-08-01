@@ -19,6 +19,7 @@ type Page = "dashboard" | "locations" | "units" | "unit-costs" | "customers" | "
 type RegistryPage = Exclude<Page, "dashboard" | "payment-settings" | "unit-costs" | "purchases">;
 type EntityType = RegistryPage | "documents";
 type Modal = null | { type: EntityType; id?: number };
+type DashboardDrilldown = null | { page: "charges" | "tasks"; ids: number[]; label: string };
 
 const menu: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Обзор", icon: LayoutDashboard },
@@ -74,6 +75,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState("all");
   const [registryMode, setRegistryMode] = useState<"active" | "archived" | "all">("active");
+  const [dashboardDrilldown, setDashboardDrilldown] = useState<DashboardDrilldown>(null);
   const [sidebar, setSidebar] = useState(false);
   const [toast, setToast] = useState("");
   const [qrContractId, setQrContractId] = useState<number | null>(null);
@@ -119,7 +121,10 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2200);
   }
   function navigate(next: Page) {
-    setPage(next); setSelectedCustomer(null); setSearch(""); setRegistryMode("active"); setSidebar(false);
+    setPage(next); setSelectedCustomer(null); setSearch(""); setRegistryMode("active"); setDashboardDrilldown(null); setSidebar(false);
+  }
+  function openDashboardDrilldown(next: Exclude<DashboardDrilldown, null>) {
+    setPage(next.page); setSelectedCustomer(null); setSearch(""); setRegistryMode("active"); setDashboardDrilldown(next); setSidebar(false);
   }
   function update(next: AppData, message: string) {
     setData(syncMonthlyPaymentTasks(next, new Date())); setModal(null); notify(message);
@@ -297,7 +302,7 @@ export default function Home() {
         {customer ? (
           <CustomerDetails data={data} customerId={customer.id} tab={customerTab} setTab={setCustomerTab} onBack={() => setSelectedCustomer(null)} onAdd={(type) => setModal({ type })} onQr={setQrContractId} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onViewScans={setScanViewerCustomerId} onUploadScan={setScanUploadCustomerId} onTelegram={setTelegramCustomerId} />
         ) : page === "dashboard" ? (
-          <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onCustomer={setSelectedCustomer} />
+          <Dashboard data={data} locationFilter={locationFilter} setLocationFilter={setLocationFilter} onNavigate={navigate} onDrilldown={openDashboardDrilldown} onCustomer={setSelectedCustomer} />
         ) : page === "payment-settings" ? (
           <PaymentSettingsPage data={data} onSave={update} />
         ) : page === "unit-costs" ? (
@@ -306,6 +311,7 @@ export default function Home() {
           <PurchasesPage data={data} onSave={update} onOpenDeal={setPurchaseDealId} />
         ) : (
           <Registry page={page} data={data} search={search} setSearch={setSearch} mode={registryMode} setMode={setRegistryMode}
+            drilldown={dashboardDrilldown?.page === page ? dashboardDrilldown : null} onClearDrilldown={() => setDashboardDrilldown(null)}
             onCustomer={setSelectedCustomer} onEdit={(id) => setModal({ type: page, id })}
             onArchive={(id) => archiveEntity(page, id)} onDelete={(id) => deleteEntity(page, id)}
             onTaskStatus={updateTaskStatus} onContractDocument={setDocumentContractId} onPayment={setSelectedPaymentId} onCopyPhoto={copyObjectPhoto} />
@@ -368,9 +374,9 @@ function Login({ onLogin }: { onLogin: (user: { role: Role; name: string }) => P
   );
 }
 
-function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCustomer }: {
+function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDrilldown, onCustomer }: {
   data: AppData; locationFilter: string; setLocationFilter: (value: string) => void;
-  onNavigate: (page: Page) => void; onCustomer: (id: number) => void;
+  onNavigate: (page: Page) => void; onDrilldown: (drilldown: Exclude<DashboardDrilldown, null>) => void; onCustomer: (id: number) => void;
 }) {
   const [view, setView] = useState<"overview" | "analytics">("overview");
   const filtered = useMemo(() => {
@@ -382,6 +388,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
     return { ...data, units: data.units.filter((unit) => unit.locationId === locationId), contracts, charges: data.charges.filter((charge) => contractIds.includes(charge.contractId)), payments: data.payments.filter((payment) => contractIds.includes(payment.contractId)) };
   }, [data, locationFilter]);
   const metrics = dashboardMetrics(filtered, new Date("2026-07-19T12:00:00"));
+  const overdueChargeIds = filtered.charges.filter((charge) => effectiveChargeStatus(charge.id, filtered, new Date("2026-07-19T12:00:00")) === "overdue").map((charge) => charge.id);
   const recentPayments = [...filtered.payments].sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)).slice(0, 4);
   const dueTasks = data.tasks.filter((task) => task.status !== "done").slice(0, 4);
   return (
@@ -396,7 +403,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
           <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
           <Kpi label="Свободно" value={String(metrics.freeUnits)} note={`${metrics.totalUnits ? Math.round(metrics.freeUnits / metrics.totalUnits * 100) : 0}% фонда`} />
           <Kpi label="Занято" value={String(metrics.occupiedUnits)} note={`${metrics.totalUnits ? Math.round(metrics.occupiedUnits / metrics.totalUnits * 100) : 0}% фонда`} />
-          <Kpi label="Просрочено" value={money(metrics.overdueAmount)} note={`${metrics.overdueChargesCount} начисления`} tone="danger" />
+          <Kpi label="Просрочено" value={money(metrics.overdueAmount)} note={`${metrics.overdueChargesCount} начисления`} tone="danger" onClick={() => onDrilldown({ page: "charges", ids: overdueChargeIds, label: "Просроченные начисления" })} />
         </section>
         <section className="dashboard-grid">
           <div className="panel span-2">
@@ -410,7 +417,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onCust
           </div>
           <div className="panel">
             <PanelHead title="Задачи" action="Все задачи" onClick={() => onNavigate("tasks")} />
-            <div className="task-list">{dueTasks.map((task) => <div className="task-item" key={task.id}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</div>)}</div>
+            <div className="task-list">{dueTasks.map((task) => <button className="task-item task-item-button" key={task.id} onClick={() => onDrilldown({ page: "tasks", ids: [task.id], label: task.title })}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</button>)}</div>
           </div>
           <div className="panel span-2">
             <PanelHead title="Договоры заканчиваются" action="Все договоры" onClick={() => onNavigate("contracts")} />
@@ -502,8 +509,9 @@ function AnalyticsDashboard({ data }: { data: AppData }) {
   );
 }
 
-function Kpi({ label, value, note, tone }: { label: string; value: string; note: string; tone?: string }) {
-  return <div className={`kpi ${tone ?? ""}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+function Kpi({ label, value, note, tone, onClick }: { label: string; value: string; note: string; tone?: string; onClick?: () => void }) {
+  const content = <><span>{label}</span><strong>{value}</strong><small>{note}</small></>;
+  return onClick ? <button className={`kpi kpi-button ${tone ?? ""}`} onClick={onClick}>{content}<ChevronRight className="kpi-arrow" size={17} /></button> : <div className={`kpi ${tone ?? ""}`}>{content}</div>;
 }
 function PanelHead({ title, action, onClick }: { title: string; action?: string; onClick?: () => void }) {
   return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>;
@@ -573,9 +581,10 @@ function UnitCostsPage({ data, onSave }: { data: AppData; onSave: (data: AppData
   );
 }
 
-function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onPayment, onCopyPhoto }: {
+function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onClearDrilldown, onCustomer, onEdit, onArchive, onDelete, onTaskStatus, onContractDocument, onPayment, onCopyPhoto }: {
   page: RegistryPage; data: AppData; search: string; setSearch: (value: string) => void;
   mode: "active" | "archived" | "all"; setMode: (value: "active" | "archived" | "all") => void;
+  drilldown: DashboardDrilldown; onClearDrilldown: () => void;
   onCustomer: (id: number) => void; onEdit: (id: number) => void; onArchive: (id: number) => void; onDelete: (id: number) => void;
   onTaskStatus: (id: number, status: TaskStatus) => void;
   onContractDocument: (id: number) => void;
@@ -650,9 +659,11 @@ function Registry({ page, data, search, setSearch, mode, setMode, onCustomer, on
   }
   const archived = new Set(data.archivedIds?.[page] ?? []);
   rows = rows.filter((row) => mode === "all" || (mode === "archived" ? archived.has(row.id) : !archived.has(row.id)));
+  if (drilldown) rows = rows.filter((row) => drilldown.ids.includes(row.id));
   headers.push("Действия");
   return (
     <section>
+      {drilldown && <div className="active-filter"><span>Показано: <strong>{drilldown.label}</strong> · {rows.length}</span><button onClick={onClearDrilldown}>Показать все<X size={14} /></button></div>}
       <div className="registry-toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск…" /></label><select value={mode} onChange={(event) => setMode(event.target.value as "active" | "archived" | "all")}><option value="all">Все записи</option><option value="active">Активные</option><option value="archived">Архивные</option></select></div>
       <div className="table-card"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>
         {rows.map((row) => <tr key={row.id} onClick={() => page === "payments" ? onPayment(row.id) : row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>
