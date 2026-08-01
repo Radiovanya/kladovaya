@@ -71,6 +71,17 @@ input[readonly] { background: var(--surface-soft); color: #4f555d; cursor: defau
 .analytics-filters select { min-width: 240px; }
 .analytics-scope { margin: -2px 0 12px; color: var(--muted); font-size: 12px; }
 .analytics-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.analytics-insight { margin: 0 0 16px; padding: 18px; overflow: visible; }
+.analytics-insight-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.analytics-insight-head small { color: var(--muted); font-size: 10px; }
+.analytics-insight-head h2 { margin: 4px 0 0; font-size: 17px; }
+.analytics-insight-head > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 3px; }
+.analytics-insight > p { margin: 13px 0; padding: 11px 12px; border-radius: 8px; background: var(--surface-soft); color: #525861; font-size: 11px; line-height: 1.5; }
+.analytics-insight > p.insight-warning { background: #f9e9e7; color: var(--danger); }
+.insight-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.insight-table-wrap table { min-width: 760px; }
+.analytics-insight-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.positive-text { color: var(--success); }
 .analytics-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
 .expense-breakdown { display: grid; gap: 18px; padding: 5px 0 3px; }
 .expense-breakdown > div > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

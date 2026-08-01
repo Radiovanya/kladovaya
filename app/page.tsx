@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitOperatingCosts, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitOperatingCosts, unitStatus, validateActiveContract } from "@/lib/business";
 import { contractPdfFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
@@ -397,7 +397,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDril
         <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><LayoutDashboard size={16} />Обзор</button>
         <button className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><BarChart3 size={16} />Аналитика</button>
       </div>
-      {view === "analytics" ? <AnalyticsDashboard data={data} /> : <>
+      {view === "analytics" ? <AnalyticsDashboard data={data} onNavigate={onNavigate} /> : <>
         <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
         <section className="kpi-grid">
           <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
@@ -440,8 +440,11 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDril
   );
 }
 
-function AnalyticsDashboard({ data }: { data: AppData }) {
+type AnalyticsInsight = "purchase" | "income" | "costs" | "profit" | "yield" | "idle";
+
+function AnalyticsDashboard({ data, onNavigate }: { data: AppData; onNavigate: (page: Page) => void }) {
   const [locationId, setLocationId] = useState(String(data.locations[0]?.id ?? ""));
+  const [insight, setInsight] = useState<AnalyticsInsight | null>(null);
   const [unitId, setUnitId] = useState(() => {
     const firstLocationId = data.locations[0]?.id;
     return String(data.units.find((unit) => unit.locationId === firstLocationId && unit.status !== "archived")?.id ?? "all");
@@ -452,6 +455,7 @@ function AnalyticsDashboard({ data }: { data: AppData }) {
   }, [unitId, units]);
   const selectedIds = unitId === "all" ? units.map((unit) => unit.id) : [Number(unitId)];
   const analytics = portfolioAnalytics(data, selectedIds, new Date());
+  const unitRows = selectedIds.map((id) => ({ unit: data.units.find((item) => item.id === id)!, analytics: unitAnalytics(data, id, new Date()) }));
   const selectedUnit = unitId === "all" ? null : data.units.find((unit) => unit.id === Number(unitId));
   const costs = selectedIds.map((id) => unitOperatingCosts(data, id));
   const annualMonthlyPayments = costs.reduce((sum, item) => sum + item.monthlyPayment * 12, 0);
@@ -476,13 +480,14 @@ function AnalyticsDashboard({ data }: { data: AppData }) {
             : `Сводные показатели по всем объектам адреса: ${selectedIds.length} шт.`}
         </p>
         <section className="analytics-kpi-grid">
-          <Kpi label="Стоимость покупки" value={money(analytics.purchasePrice)} note={selectedUnit ? `Объект № ${selectedUnit.unitNumber}` : `${selectedIds.length} объектов`} />
-          <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note="Фактические оплаты за 12 месяцев" />
-          <Kpi label="Затраты на содержание" value={money(analytics.operatingCosts)} note="Годовая сумма расходов" />
-          <Kpi label="Прибыль" value={money(analytics.profit)} note="Доход минус содержание" tone={analytics.profit < 0 ? "danger" : "positive"} />
-          <Kpi label="Доходность аренды" value={`${analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%`} note="Годовой доход / стоимость × 100%" />
-          <Kpi label="Простой" value={`${analytics.idleDays} дн.`} note={analytics.trackingSince ? `Учёт с ${date(analytics.trackingSince)}` : "История статусов ещё не накоплена"} />
+          <Kpi label="Стоимость покупки" value={money(analytics.purchasePrice)} note={selectedUnit ? `Объект № ${selectedUnit.unitNumber}` : `${selectedIds.length} объектов`} tone={analytics.purchasePrice <= 0 ? "danger" : undefined} onClick={() => setInsight("purchase")} />
+          <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note="Фактические оплаты за 12 месяцев" tone={analytics.rentalIncome <= 0 ? "danger" : undefined} onClick={() => setInsight("income")} />
+          <Kpi label="Затраты на содержание" value={money(analytics.operatingCosts)} note="Годовая сумма расходов" onClick={() => setInsight("costs")} />
+          <Kpi label="Прибыль" value={money(analytics.profit)} note="Доход минус содержание" tone={analytics.profit <= 0 ? "danger" : "positive"} onClick={() => setInsight("profit")} />
+          <Kpi label="Доходность аренды" value={`${analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%`} note="Годовой доход / стоимость × 100%" tone={analytics.yieldPercent <= 0 ? "danger" : "positive"} onClick={() => setInsight("yield")} />
+          <Kpi label="Простой" value={`${analytics.idleDays} дн.`} note={analytics.trackingSince ? `Учёт с ${date(analytics.trackingSince)}` : "История статусов ещё не накоплена"} tone={analytics.idleDays > 0 ? "danger" : "positive"} onClick={() => setInsight("idle")} />
         </section>
+        {insight && <AnalyticsInsightPanel insight={insight} rows={unitRows} total={analytics} onClose={() => setInsight(null)} onNavigate={onNavigate} />}
         <section className="analytics-grid">
           <div className="panel">
             <PanelHead title="Структура затрат за 12 месяцев" />
@@ -507,6 +512,30 @@ function AnalyticsDashboard({ data }: { data: AppData }) {
       </>}
     </>
   );
+}
+
+function AnalyticsInsightPanel({ insight, rows, total, onClose, onNavigate }: {
+  insight: AnalyticsInsight;
+  rows: { unit: AppData["units"][number]; analytics: ReturnType<typeof unitAnalytics> }[];
+  total: ReturnType<typeof portfolioAnalytics>;
+  onClose: () => void;
+  onNavigate: (page: Page) => void;
+}) {
+  const config: Record<AnalyticsInsight, { title: string; explanation: string; action: string; page: Page }> = {
+    purchase: { title: "Стоимость покупки", explanation: total.purchasePrice <= 0 ? "Стоимость покупки не заполнена. Без неё невозможно корректно рассчитать доходность." : "Итог складывается из стоимости покупки выбранных объектов.", action: "Открыть содержание", page: "unit-costs" },
+    income: { title: "Доход от аренды", explanation: total.rentalIncome <= 0 ? "За последние 12 месяцев не найдено подтверждённых оплат аренды, привязанных к этим объектам." : "Показаны фактические подтверждённые оплаты аренды за последние 12 месяцев.", action: "Открыть оплаты", page: "payments" },
+    costs: { title: "Затраты на содержание", explanation: "Для каждого объекта учтены: ежемесячный платёж × 12, годовые членские взносы и дополнительные расходы.", action: "Открыть содержание", page: "unit-costs" },
+    profit: { title: "Почему прибыль отрицательная или нулевая", explanation: total.profit <= 0 ? `Расходы ${money(total.operatingCosts)} не покрываются доходом ${money(total.rentalIncome)}. Проверьте оплаты и статьи содержания ниже.` : "Доход превышает расходы. Ниже показан вклад каждого объекта.", action: total.rentalIncome <= 0 ? "Проверить оплаты" : "Проверить расходы", page: total.rentalIncome <= 0 ? "payments" : "unit-costs" },
+    yield: { title: "Доходность аренды", explanation: total.purchasePrice <= 0 ? "Доходность равна нулю, потому что не заполнена стоимость покупки." : total.rentalIncome <= 0 ? "Доходность равна нулю, потому что за 12 месяцев нет учтённого дохода от аренды." : "Доходность рассчитана как доход за 12 месяцев / стоимость покупки × 100%.", action: total.purchasePrice <= 0 ? "Заполнить стоимость" : "Проверить оплаты", page: total.purchasePrice <= 0 ? "unit-costs" : "payments" },
+    idle: { title: "Простой объектов", explanation: total.idleDays > 0 ? "Это дни, когда объект имел статус «Свободна» или «В ремонте». Ниже видно, где возник простой." : "За доступный период истории статусов простой не зафиксирован.", action: "Открыть объекты", page: "units" }
+  };
+  const selected = config[insight];
+  return <section className="analytics-insight panel">
+    <div className="analytics-insight-head"><div><small>Углублённая аналитика</small><h2>{selected.title}</h2></div><button aria-label="Закрыть расшифровку" onClick={onClose}><X size={18} /></button></div>
+    <p className={(["income", "profit", "yield"].includes(insight) && ((insight === "profit" && total.profit <= 0) || (insight === "income" && total.rentalIncome <= 0) || (insight === "yield" && total.yieldPercent <= 0))) ? "insight-warning" : ""}>{selected.explanation}</p>
+    <div className="insight-table-wrap"><table><thead><tr><th>Объект</th><th className="number">Покупка</th><th className="number">Доход</th><th className="number">Содержание</th><th className="number">Прибыль</th><th className="number">Доходность</th><th className="number">Простой</th></tr></thead><tbody>{rows.map((row) => <tr key={row.unit.id}><td><strong>№ {row.unit.unitNumber}</strong></td><td className="number">{money(row.analytics.purchasePrice)}</td><td className={`number ${row.analytics.rentalIncome <= 0 ? "danger-text" : ""}`}>{money(row.analytics.rentalIncome)}</td><td className="number">{money(row.analytics.operatingCosts)}</td><td className={`number ${row.analytics.profit <= 0 ? "danger-text" : "positive-text"}`}>{money(row.analytics.profit)}</td><td className={`number ${row.analytics.yieldPercent <= 0 ? "danger-text" : ""}`}>{row.analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%</td><td className={`number ${row.analytics.idleDays > 0 ? "danger-text" : ""}`}>{row.analytics.idleDays} дн.</td></tr>)}</tbody></table></div>
+    <div className="analytics-insight-actions"><button className="button" onClick={onClose}>Закрыть</button><button className="button primary" onClick={() => onNavigate(selected.page)}>{selected.action}<ChevronRight size={16} /></button></div>
+  </section>;
 }
 
 function Kpi({ label, value, note, tone, onClick }: { label: string; value: string; note: string; tone?: string; onClick?: () => void }) {
