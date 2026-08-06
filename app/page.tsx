@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitOperatingCosts, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitOperatingCosts, unitRentPaidThrough, unitStatus, validateActiveContract } from "@/lib/business";
 import { contractPdfFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
@@ -471,7 +471,7 @@ function AnalyticsDashboard({ data, onNavigate }: { data: AppData; onNavigate: (
   }, [unitId, units]);
   const selectedIds = unitId === "all" ? units.map((unit) => unit.id) : [Number(unitId)];
   const analytics = portfolioAnalytics(data, selectedIds, new Date());
-  const unitRows = selectedIds.map((id) => ({ unit: data.units.find((item) => item.id === id)!, analytics: unitAnalytics(data, id, new Date()) }));
+  const unitRows = selectedIds.map((id) => ({ unit: data.units.find((item) => item.id === id)!, analytics: unitAnalytics(data, id, new Date()), paidThrough: unitRentPaidThrough(data, id) }));
   const selectedUnit = unitId === "all" ? null : data.units.find((unit) => unit.id === Number(unitId));
   const costs = selectedIds.map((id) => unitOperatingCosts(data, id));
   const annualMonthlyPayments = costs.reduce((sum, item) => sum + item.monthlyPayment * 12, 0);
@@ -497,7 +497,7 @@ function AnalyticsDashboard({ data, onNavigate }: { data: AppData; onNavigate: (
         </p>
         <section className="analytics-kpi-grid">
           <Kpi label="Стоимость покупки" value={money(analytics.purchasePrice)} note={selectedUnit ? `Объект № ${selectedUnit.unitNumber}` : `${selectedIds.length} объектов`} tone={analytics.purchasePrice <= 0 ? "danger" : undefined} onClick={() => setInsight("purchase")} />
-          <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note="Фактические оплаты за 12 месяцев" tone={analytics.rentalIncome <= 0 ? "danger" : undefined} onClick={() => setInsight("income")} />
+          <Kpi label="Доход от аренды" value={money(analytics.rentalIncome)} note={selectedUnit ? `Оплачено до: ${unitRentPaidThrough(data, selectedUnit.id) ? date(unitRentPaidThrough(data, selectedUnit.id)!) : "нет закрытых периодов"}` : "Фактические оплаты за 12 месяцев · сроки в расшифровке"} tone={analytics.rentalIncome <= 0 ? "danger" : undefined} onClick={() => setInsight("income")} />
           <Kpi label="Затраты на содержание" value={money(analytics.operatingCosts)} note="Годовая сумма расходов" onClick={() => setInsight("costs")} />
           <Kpi label="Прибыль" value={money(analytics.profit)} note="Доход минус содержание" tone={analytics.profit <= 0 ? "danger" : "positive"} onClick={() => setInsight("profit")} />
           <Kpi label="Доходность аренды" value={`${analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%`} note="Годовой доход / стоимость × 100%" tone={analytics.yieldPercent <= 0 ? "danger" : "positive"} onClick={() => setInsight("yield")} />
@@ -532,7 +532,7 @@ function AnalyticsDashboard({ data, onNavigate }: { data: AppData; onNavigate: (
 
 function AnalyticsInsightPanel({ insight, rows, total, onClose, onNavigate }: {
   insight: AnalyticsInsight;
-  rows: { unit: AppData["units"][number]; analytics: ReturnType<typeof unitAnalytics> }[];
+  rows: { unit: AppData["units"][number]; analytics: ReturnType<typeof unitAnalytics>; paidThrough: string | null }[];
   total: ReturnType<typeof portfolioAnalytics>;
   onClose: () => void;
   onNavigate: (page: Page) => void;
@@ -549,7 +549,7 @@ function AnalyticsInsightPanel({ insight, rows, total, onClose, onNavigate }: {
   return <section className="analytics-insight panel">
     <div className="analytics-insight-head"><div><small>Углублённая аналитика</small><h2>{selected.title}</h2></div><button aria-label="Закрыть расшифровку" onClick={onClose}><X size={18} /></button></div>
     <p className={(["income", "profit", "yield"].includes(insight) && ((insight === "profit" && total.profit <= 0) || (insight === "income" && total.rentalIncome <= 0) || (insight === "yield" && total.yieldPercent <= 0))) ? "insight-warning" : ""}>{selected.explanation}</p>
-    <div className="insight-table-wrap"><table><thead><tr><th>Объект</th><th className="number">Покупка</th><th className="number">Доход</th><th className="number">Содержание</th><th className="number">Прибыль</th><th className="number">Доходность</th><th className="number">Простой</th></tr></thead><tbody>{rows.map((row) => <tr key={row.unit.id}><td><strong>№ {row.unit.unitNumber}</strong></td><td className="number">{money(row.analytics.purchasePrice)}</td><td className={`number ${row.analytics.rentalIncome <= 0 ? "danger-text" : ""}`}>{money(row.analytics.rentalIncome)}</td><td className="number">{money(row.analytics.operatingCosts)}</td><td className={`number ${row.analytics.profit <= 0 ? "danger-text" : "positive-text"}`}>{money(row.analytics.profit)}</td><td className={`number ${row.analytics.yieldPercent <= 0 ? "danger-text" : ""}`}>{row.analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%</td><td className={`number ${row.analytics.idleDays > 0 ? "danger-text" : ""}`}>{row.analytics.idleDays} дн.</td></tr>)}</tbody></table></div>
+    <div className="insight-table-wrap"><table><thead><tr><th>Объект</th><th>Аренда оплачена до</th><th className="number">Покупка</th><th className="number">Доход</th><th className="number">Содержание</th><th className="number">Прибыль</th><th className="number">Доходность</th><th className="number">Простой</th></tr></thead><tbody>{rows.map((row) => <tr key={row.unit.id}><td><strong>№ {row.unit.unitNumber}</strong></td><td className={row.paidThrough ? "positive-text" : "danger-text"}>{row.paidThrough ? date(row.paidThrough) : "Нет закрытых периодов"}</td><td className="number">{money(row.analytics.purchasePrice)}</td><td className={`number ${row.analytics.rentalIncome <= 0 ? "danger-text" : ""}`}>{money(row.analytics.rentalIncome)}</td><td className="number">{money(row.analytics.operatingCosts)}</td><td className={`number ${row.analytics.profit <= 0 ? "danger-text" : "positive-text"}`}>{money(row.analytics.profit)}</td><td className={`number ${row.analytics.yieldPercent <= 0 ? "danger-text" : ""}`}>{row.analytics.yieldPercent.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}%</td><td className={`number ${row.analytics.idleDays > 0 ? "danger-text" : ""}`}>{row.analytics.idleDays} дн.</td></tr>)}</tbody></table></div>
     <div className="analytics-insight-actions"><button className="button" onClick={onClose}>Закрыть</button><button className="button primary" onClick={() => onNavigate(selected.page)}>{selected.action}<ChevronRight size={16} /></button></div>
   </section>;
 }
@@ -648,8 +648,8 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
     headers = ["Название", "Адрес", "Объекты", "Свободно", "Статус"];
     rows = data.locations.filter((x) => cell(x.name) || cell(x.address)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.name}</strong>, x.address, data.units.filter((u) => u.locationId === x.id).length, data.units.filter((u) => u.locationId === x.id && unitStatus(u.id, data) === "free").length, badge(x.isActive ? "active" : "archived")] }));
   } else if (page === "units") {
-    headers = ["Номер", "Адрес", "Тип", "Площадь", "Ставка", "Статус"];
-    rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => ({ id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, unitTypeName(x.unitType), `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }));
+    headers = ["Номер", "Адрес", "Аренда оплачена до", "Площадь", "Ставка", "Статус"];
+    rows = data.units.filter((x) => cell(x.unitNumber)).map((x) => { const paidThrough = unitRentPaidThrough(data, x.id); return { id: x.id, cells: [<strong key="n">{x.unitNumber}</strong>, data.locations.find((l) => l.id === x.locationId)?.name, <span className={paidThrough ? "positive-text" : "muted-text"} key="paid">{paidThrough ? date(paidThrough) : "Нет закрытых периодов"}</span>, `${x.areaSqm} м²`, money(x.monthlyRate), badge(unitStatus(x.id, data))] }; });
   } else if (page === "customers") {
     headers = ["ФИО", "Телефон", "Email", "Кладовая", "Задолженность"];
     rows = data.customers.filter((x) => cell(x.fullName) || cell(x.phone) || cell(x.email)).map((x) => {

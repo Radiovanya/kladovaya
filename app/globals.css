@@ -85,6 +85,7 @@ input[readonly] { background: var(--surface-soft); color: #4f555d; cursor: defau
 .insight-table-wrap table { min-width: 760px; }
 .analytics-insight-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .positive-text { color: var(--success); }
+.muted-text { color: var(--muted); }
 .analytics-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
 .expense-breakdown { display: grid; gap: 18px; padding: 5px 0 3px; }
 .expense-breakdown > div > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

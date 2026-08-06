@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import QRCode from "qrcode";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitRentPaidThrough, unitStatus, validateActiveContract } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
 import { findContractNumber, findPaymentPeriod } from "../lib/receipt-email";
@@ -22,6 +22,12 @@ test("неполностью оплаченное начисление посл�
 
 test("ручной статус занятого объекта сохраняется", () => {
   assert.equal(unitStatus(1, seedData), "occupied");
+});
+
+test("показывается последний полностью оплаченный период аренды объекта", () => {
+  const unitId = seedData.contracts.find((contract) => seedData.payments.some((payment) => payment.contractId === contract.id && payment.chargeId))!.unitId;
+  const paidCharge = seedData.charges.filter((charge) => seedData.contracts.some((contract) => contract.id === charge.contractId && contract.unitId === unitId) && chargePaidAmount(charge.id, seedData) >= charge.amount).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).at(-1);
+  assert.equal(unitRentPaidThrough(seedData, unitId), paidCharge?.periodEnd ?? null);
 });
 
 test("ручной статус ремонта сохраняется", () => {

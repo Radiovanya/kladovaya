@@ -154,6 +154,15 @@ export function unitOperatingCosts(data: AppData, unitId: number): UnitOperating
   };
 }
 
+export function unitRentPaidThrough(data: AppData, unitId: number) {
+  const contractIds = data.contracts.filter((contract) => contract.unitId === unitId).map((contract) => contract.id);
+  return data.charges
+    .filter((charge) => contractIds.includes(charge.contractId) && charge.chargeType === "rent" && charge.status !== "cancelled" && chargePaidAmount(charge.id, data) >= charge.amount)
+    .map((charge) => charge.periodEnd)
+    .sort()
+    .at(-1) ?? null;
+}
+
 export interface UnitAnalytics {
   unitId: number;
   purchasePrice: number;
