@@ -63,6 +63,20 @@ const isoToday = () => new Date().toISOString().slice(0, 10);
 const badge = (status: string) => <span className={`badge badge-${status}`}>{statusText[status] ?? status}</span>;
 const nextId = <T extends { id: number }>(rows: T[]) => Math.max(0, ...rows.map((row) => row.id)) + 1;
 
+function taskUnitId(task: AppData["tasks"][number], data: AppData) {
+  if (task.relatedEntityType === "unit") return task.relatedEntityId ?? undefined;
+  if (task.relatedEntityType === "contract_payment") return data.contracts.find((item) => item.id === task.relatedEntityId)?.unitId;
+  if (task.relatedEntityType === "customer") return data.contracts.find((item) => item.customerId === task.relatedEntityId && item.status === "active")?.unitId
+    ?? data.contracts.find((item) => item.customerId === task.relatedEntityId)?.unitId;
+  return undefined;
+}
+
+function taskObjectLabel(task: AppData["tasks"][number], data: AppData) {
+  const unit = data.units.find((item) => item.id === taskUnitId(task, data));
+  const location = data.locations.find((item) => item.id === unit?.locationId);
+  return unit ? { title: `Кладовая № ${unit.unitNumber}`, location: location?.name ?? location?.address ?? "Адрес не указан" } : { title: task.title, location: "Объект не привязан" };
+}
+
 export default function Home() {
   const { data, setData, reset, reload, ready, saveError, isDemo } = useAppStore();
   const [role, setRole] = useState<Role | null>(null);
@@ -379,18 +393,20 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDril
   onNavigate: (page: Page) => void; onDrilldown: (drilldown: Exclude<DashboardDrilldown, null>) => void; onCustomer: (id: number) => void;
 }) {
   const [view, setView] = useState<"overview" | "analytics">("overview");
+  const [dashboardUnitId, setDashboardUnitId] = useState("all");
+  const dashboardUnits = data.units.filter((unit) => locationFilter === "all" || String(unit.locationId) === locationFilter);
   const filtered = useMemo(() => {
-    if (locationFilter === "all") return data;
-    const locationId = Number(locationFilter);
-    const unitIds = data.units.filter((unit) => unit.locationId === locationId).map((unit) => unit.id);
+    if (locationFilter === "all" && dashboardUnitId === "all") return data;
+    const unitIds = data.units.filter((unit) => (locationFilter === "all" || String(unit.locationId) === locationFilter) && (dashboardUnitId === "all" || String(unit.id) === dashboardUnitId)).map((unit) => unit.id);
     const contracts = data.contracts.filter((contract) => unitIds.includes(contract.unitId));
     const contractIds = contracts.map((contract) => contract.id);
-    return { ...data, units: data.units.filter((unit) => unit.locationId === locationId), contracts, charges: data.charges.filter((charge) => contractIds.includes(charge.contractId)), payments: data.payments.filter((payment) => contractIds.includes(payment.contractId)) };
-  }, [data, locationFilter]);
+    const locationIds = [...new Set(data.units.filter((unit) => unitIds.includes(unit.id)).map((unit) => unit.locationId))];
+    return { ...data, locations: data.locations.filter((location) => locationIds.includes(location.id)), units: data.units.filter((unit) => unitIds.includes(unit.id)), contracts, charges: data.charges.filter((charge) => contractIds.includes(charge.contractId)), payments: data.payments.filter((payment) => contractIds.includes(payment.contractId)), tasks: data.tasks.filter((task) => { const id = taskUnitId(task, data); return id ? unitIds.includes(id) : false; }) };
+  }, [data, locationFilter, dashboardUnitId]);
   const metrics = dashboardMetrics(filtered, new Date("2026-07-19T12:00:00"));
   const overdueChargeIds = filtered.charges.filter((charge) => effectiveChargeStatus(charge.id, filtered, new Date("2026-07-19T12:00:00")) === "overdue").map((charge) => charge.id);
   const recentPayments = [...filtered.payments].sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)).slice(0, 4);
-  const dueTasks = data.tasks.filter((task) => task.status !== "done").slice(0, 4);
+  const dueTasks = filtered.tasks.filter((task) => task.status !== "done").slice(0, 4);
   return (
     <>
       <div className="dashboard-tabs">
@@ -398,7 +414,7 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDril
         <button className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><BarChart3 size={16} />Аналитика</button>
       </div>
       {view === "analytics" ? <AnalyticsDashboard data={data} onNavigate={onNavigate} /> : <>
-        <div className="filter-row"><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></div>
+        <div className="filter-row entity-filters"><label>Адрес<select value={locationFilter} onChange={(event) => { setLocationFilter(event.target.value); setDashboardUnitId("all"); }}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Объект<select value={dashboardUnitId} onChange={(event) => setDashboardUnitId(event.target.value)}><option value="all">Все объекты</option>{dashboardUnits.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber}</option>)}</select></label></div>
         <section className="kpi-grid">
           <Kpi label="Всего объектов" value={String(metrics.totalUnits)} note={`${filtered.locations.length} адреса`} />
           <Kpi label="Свободно" value={String(metrics.freeUnits)} note={`${metrics.totalUnits ? Math.round(metrics.freeUnits / metrics.totalUnits * 100) : 0}% фонда`} />
@@ -417,19 +433,19 @@ function Dashboard({ data, locationFilter, setLocationFilter, onNavigate, onDril
           </div>
           <div className="panel">
             <PanelHead title="Задачи" action="Все задачи" onClick={() => onNavigate("tasks")} />
-            <div className="task-list">{dueTasks.map((task) => <button className="task-item task-item-button" key={task.id} onClick={() => onDrilldown({ page: "tasks", ids: [task.id], label: task.title })}><span className={`task-dot ${task.priority}`} /><span><strong>{task.title}</strong><small>{date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</button>)}</div>
+            <div className="task-list">{dueTasks.map((task) => { const object = taskObjectLabel(task, data); return <button className="task-item task-item-button" key={task.id} onClick={() => onDrilldown({ page: "tasks", ids: [task.id], label: `${object.title} · ${object.location}` })}><span className={`task-dot ${task.priority}`} /><span><strong>{object.title}</strong><small>{object.location} · {date(task.dueDate)} · {task.relatedEntityType === "contract_payment" && task.status === "open" ? "Ожидает отправки" : statusText[task.status]}</small></span>{badge(task.status)}</button>; })}</div>
           </div>
           <div className="panel span-2">
             <PanelHead title="Договоры заканчиваются" action="Все договоры" onClick={() => onNavigate("contracts")} />
-            <table><tbody>{data.contracts.filter((contract) => contract.status === "active" && contract.endDate <= "2026-08-18").map((contract) => {
+            <table><tbody>{filtered.contracts.filter((contract) => contract.status === "active" && contract.endDate <= "2026-08-18").map((contract) => {
               const customer = data.customers.find((item) => item.id === contract.customerId);
               return <tr key={contract.id} onClick={() => customer && onCustomer(customer.id)}><td><strong>{contract.contractNumber}</strong><small className="cell-sub">{customer?.fullName}</small></td><td>{date(contract.endDate)}</td><td>{badge("active")}</td></tr>;
             })}</tbody></table>
           </div>
           <div className="panel">
             <PanelHead title="Заполняемость" />
-            <div className="occupancy-list">{data.locations.map((location) => {
-              const units = data.units.filter((unit) => unit.locationId === location.id && unit.status !== "archived");
+            <div className="occupancy-list">{filtered.locations.map((location) => {
+              const units = filtered.units.filter((unit) => unit.locationId === location.id && unit.status !== "archived");
               const occupied = units.filter((unit) => unitStatus(unit.id, data) === "occupied").length;
               return <div key={location.id}><span><strong>{location.name}</strong><small>{occupied} / {units.length}</small></span><div className="progress"><i style={{ width: `${units.length ? occupied / units.length * 100 : 0}%` }} /></div></div>;
             })}</div>
@@ -547,7 +563,9 @@ function PanelHead({ title, action, onClick }: { title: string; action?: string;
 }
 
 function UnitCostsPage({ data, onSave }: { data: AppData; onSave: (data: AppData, message: string) => void }) {
-  const [selectedId, setSelectedId] = useState(data.units[0]?.id ?? 0);
+  const [costLocationId, setCostLocationId] = useState(String(data.locations[0]?.id ?? "all"));
+  const availableCostUnits = data.units.filter((unit) => costLocationId === "all" || String(unit.locationId) === costLocationId);
+  const [selectedId, setSelectedId] = useState(data.units.find((unit) => String(unit.locationId) === String(data.locations[0]?.id))?.id ?? data.units[0]?.id ?? 0);
   const selected = data.units.find((unit) => unit.id === selectedId) ?? data.units[0];
   if (!selected) return <div className="empty panel">Сначала добавьте объект</div>;
   const costs = unitOperatingCosts(data, selected.id);
@@ -574,10 +592,11 @@ function UnitCostsPage({ data, onSave }: { data: AppData; onSave: (data: AppData
   }
 
   return (
+    <><div className="entity-filters"><label>Адрес<select value={costLocationId} onChange={(event) => { const next = event.target.value; setCostLocationId(next); setSelectedId(data.units.find((unit) => next === "all" || String(unit.locationId) === next)?.id ?? 0); }}><option value="all">Все адреса</option>{data.locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Объект<select value={selectedId} onChange={(event) => setSelectedId(Number(event.target.value))}>{availableCostUnits.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber}</option>)}</select></label></div>
     <section className="unit-costs-layout">
       <aside className="unit-costs-list">
-        <div className="unit-costs-list-head"><strong>Все объекты</strong><span>{data.units.length}</span></div>
-        {data.units.map((unit) => {
+        <div className="unit-costs-list-head"><strong>Объекты по фильтру</strong><span>{availableCostUnits.length}</span></div>
+        {availableCostUnits.map((unit) => {
           const unitLocation = data.locations.find((item) => item.id === unit.locationId);
           const unitCosts = unitOperatingCosts(data, unit.id);
           return <button type="button" className={unit.id === selected.id ? "active" : ""} onClick={() => setSelectedId(unit.id)} key={unit.id}>
@@ -606,7 +625,7 @@ function UnitCostsPage({ data, onSave }: { data: AppData; onSave: (data: AppData
         <div className="unit-costs-note">Эти данные используются во вкладке «Обзор → Аналитика». Годовые затраты = оплата в месяц × 12 + членские взносы + дополнительные расходы.</div>
         <div className="modal-actions"><button className="button primary"><Save size={16} />Сохранить</button></div>
       </form>
-    </section>
+    </section></>
   );
 }
 
@@ -620,6 +639,8 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
   onPayment: (id: number) => void;
   onCopyPhoto: (id: number) => void;
 }) {
+  const [filterLocationId, setFilterLocationId] = useState("all");
+  const [filterUnitId, setFilterUnitId] = useState("all");
   const q = search.toLowerCase();
   const cell = (value: unknown) => String(value ?? "").toLowerCase().includes(q);
   let headers: string[] = [], rows: { id: number; cells: React.ReactNode[]; customerId?: number }[] = [];
@@ -664,11 +685,13 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
       return { id: x.id, customerId: x.customerId, cells: [date(x.paymentDate), <span className="entity-info-cell" key="unit"><strong>№ {unit?.unitNumber ?? "—"}</strong><small>{location?.name ?? location?.address ?? "Локация не указана"}</small></span>, <span className="entity-info-cell" key="payer"><strong>{customer?.fullName ?? "—"}</strong><small>{contract?.contractNumber ?? "Договор не найден"}</small></span>, methodName(x.paymentMethod), x.referenceNumber || "—", <strong key="m">{money(x.amount)}</strong>, badge(x.status ?? "confirmed")] };
     });
   } else if (page === "tasks") {
-    headers = ["Задача", "Срок", "Приоритет", "Статус"];
-    rows = data.tasks.filter((x) => cell(x.title)).map((x) => {
+    headers = ["Кладовая и адрес", "Задача", "Срок", "Приоритет", "Статус"];
+    rows = data.tasks.filter((x) => { const object = taskObjectLabel(x, data); return cell(x.title) || cell(object.title) || cell(object.location); }).map((x) => {
       const isPaymentTask = x.relatedEntityType === "contract_payment";
+      const object = taskObjectLabel(x, data);
       return { id: x.id, cells: [
-        <span className="task-title-cell" key="n"><strong>{x.title}</strong>{x.paymentPeriod && <small>{paymentPeriodLabel(x.paymentPeriod)}</small>}</span>,
+        <span className="entity-info-cell" key="object"><strong>{object.title}</strong><small>{object.location}</small></span>,
+        <span className="task-title-cell" key="n"><strong>{x.relatedEntityType === "contract_payment" ? "Отправить уведомление об оплате" : x.title}</strong>{x.paymentPeriod && <small>{paymentPeriodLabel(x.paymentPeriod)}</small>}</span>,
         date(x.dueDate),
         <span className={`priority ${x.priority}`} key="p">{priorityName(x.priority)}</span>,
         <select className={`task-status-select status-${x.status}`} key="s" value={x.status}
@@ -689,10 +712,25 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
   const archived = new Set(data.archivedIds?.[page] ?? []);
   rows = rows.filter((row) => mode === "all" || (mode === "archived" ? archived.has(row.id) : !archived.has(row.id)));
   if (drilldown) rows = rows.filter((row) => drilldown.ids.includes(row.id));
+  const rowUnitIds = (rowId: number) => {
+    if (page === "locations") return data.units.filter((unit) => unit.locationId === rowId).map((unit) => unit.id);
+    if (page === "units") return [rowId];
+    if (page === "customers") return data.contracts.filter((contract) => contract.customerId === rowId).map((contract) => contract.unitId);
+    if (page === "contracts") return [data.contracts.find((contract) => contract.id === rowId)?.unitId].filter((id): id is number => Boolean(id));
+    if (page === "charges") { const charge = data.charges.find((item) => item.id === rowId); const contract = data.contracts.find((item) => item.id === charge?.contractId); return contract ? [contract.unitId] : []; }
+    if (page === "payments") { const payment = data.payments.find((item) => item.id === rowId); const contract = data.contracts.find((item) => item.id === payment?.contractId); return contract ? [contract.unitId] : []; }
+    if (page === "tasks") { const task = data.tasks.find((item) => item.id === rowId); const id = task ? taskUnitId(task, data) : undefined; return id ? [id] : []; }
+    return [];
+  };
+  if (filterLocationId !== "all") rows = rows.filter((row) => rowUnitIds(row.id).some((id) => String(data.units.find((unit) => unit.id === id)?.locationId) === filterLocationId));
+  if (filterUnitId !== "all") rows = rows.filter((row) => rowUnitIds(row.id).includes(Number(filterUnitId)));
+  const filterUnits = data.units.filter((unit) => filterLocationId === "all" || String(unit.locationId) === filterLocationId);
+  const showEntityFilters = page !== "users";
   headers.push("Действия");
   return (
     <section>
       {drilldown && <div className="active-filter"><span>Показано: <strong>{drilldown.label}</strong> · {rows.length}</span><button onClick={onClearDrilldown}>Показать все<X size={14} /></button></div>}
+      {showEntityFilters && <div className="entity-filters"><label>Адрес<select value={filterLocationId} onChange={(event) => { setFilterLocationId(event.target.value); setFilterUnitId("all"); }}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Объект<select value={filterUnitId} onChange={(event) => setFilterUnitId(event.target.value)}><option value="all">Все объекты</option>{filterUnits.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber}</option>)}</select></label></div>}
       <div className="registry-toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск…" /></label><select value={mode} onChange={(event) => setMode(event.target.value as "active" | "archived" | "all")}><option value="all">Все записи</option><option value="active">Активные</option><option value="archived">Архивные</option></select></div>
       <div className="table-card"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>
         {rows.map((row) => <tr key={row.id} onClick={() => page === "payments" ? onPayment(row.id) : row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>

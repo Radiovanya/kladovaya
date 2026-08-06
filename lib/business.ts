@@ -400,6 +400,9 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     ) continue;
 
     const customer = next.customers.find((item) => item.id === contract.customerId);
+    const unit = next.units.find((item) => item.id === contract.unitId);
+    const location = next.locations.find((item) => item.id === unit?.locationId);
+    const taskTitle = unit ? `Кладовая № ${unit.unitNumber} · ${location?.name ?? location?.address ?? "Адрес не указан"}` : "Кладовая не указана";
     const scheduledCharge = contract.paymentIntervalMonths
       ? next.charges
         .filter((item) => item.contractId === contract.id && item.chargeType === "rent" && item.status !== "cancelled" && effectiveChargeStatus(item.id, next, now) !== "paid")
@@ -414,7 +417,7 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     );
     if (existing) {
       existing.dueDate = dueDate;
-      existing.title = `Отправить оплату · ${contract.contractNumber}`;
+      existing.title = taskTitle;
       existing.priority = new Date(dueDate) <= now ? "high" : "medium";
       const detectedStatus = paymentTaskStatus(next, contract.id, period, now);
       if (detectedStatus !== "open") existing.status = detectedStatus;
@@ -422,7 +425,7 @@ export function syncMonthlyPaymentTasks(data: AppData, now = new Date()): AppDat
     }
     next.tasks.push({
       id: Math.max(0, ...next.tasks.map((task) => task.id)) + 1,
-      title: `Отправить оплату · ${contract.contractNumber}`,
+      title: taskTitle,
       description: `${scheduledCharge ? `Оплата за ${scheduledCharge.periodStart}–${scheduledCharge.periodEnd}` : "Ежемесячная оплата"} ${money(scheduledCharge?.amount ?? contract.monthlyRate)}${customer?.email ? ` · ${customer.email}` : ""}`,
       dueDate,
       priority: new Date(dueDate) <= now ? "high" : "medium",

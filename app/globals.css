@@ -48,6 +48,9 @@ main { min-width: 0; padding: 25px 30px 48px; }
 .button.primary { background: var(--primary); border-color: var(--primary); color: white; }
 .button.primary:hover { background: var(--primary-hover); }
 .filter-row { margin-bottom: 13px; display: flex; }
+.entity-filters { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 13px; }
+.entity-filters label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
+.entity-filters select { min-width: 220px; }
 select, input { border: 1px solid var(--border); border-radius: 8px; min-height: 36px; background: var(--surface); color: var(--text); padding: 7px 10px; }
 input[readonly] { background: var(--surface-soft); color: #4f555d; cursor: default; }
 .filter-row select { min-width: 190px; }
@@ -338,8 +341,8 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
   .menu-button { display: block; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .analytics-grid, .unit-costs-layout { grid-template-columns: 1fr; }
-  .analytics-filters { align-items: stretch; flex-direction: column; }
-  .analytics-filters select { width: 100%; min-width: 0; }
+  .analytics-filters, .entity-filters { align-items: stretch; flex-direction: column; }
+  .analytics-filters select, .entity-filters select { width: 100%; min-width: 0; }
   .unit-costs-list { max-height: 300px; overflow-y: auto; }
   .unit-costs-detail > header { flex-direction: column; }
   .unit-costs-summary { grid-template-columns: 1fr; }

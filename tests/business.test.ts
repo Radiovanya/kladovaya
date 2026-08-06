@@ -192,6 +192,9 @@ test("для активных договоров создаются ежемес
   const first = paymentTasks.find((task) => task.relatedEntityId === seedData.contracts[0].id);
   assert.equal(first?.dueDate, paymentTaskDueDate(seedData.contracts[0], "2026-07"));
   assert.equal(first?.status, "paid");
+  const firstUnit = seedData.units.find((unit) => unit.id === seedData.contracts[0].unitId)!;
+  const firstLocation = seedData.locations.find((location) => location.id === firstUnit.locationId)!;
+  assert.equal(first?.title, `Кладовая № ${firstUnit.unitNumber} · ${firstLocation.name}`);
 });
 
 test("повторная синхронизация не дублирует задачу за тот же месяц", () => {
