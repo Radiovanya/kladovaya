@@ -1,4 +1,4 @@
-import type { AppData, ChargeStatus, Contract, PaymentSettings, TaskStatus, UnitOperatingCosts, UnitStatus } from "./types";
+import type { AppData, Charge, ChargeStatus, Contract, PaymentSettings, TaskStatus, UnitOperatingCosts, UnitStatus } from "./types";
 
 export const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
@@ -340,6 +340,16 @@ const addMonthsClamped = (date: Date, months: number) => {
   const lastDay = new Date(date.getFullYear(), targetMonth + 1, 0).getDate();
   return new Date(date.getFullYear(), targetMonth, Math.min(date.getDate(), lastDay), 12);
 };
+const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12);
+const periodsOverlap = (leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) => leftStart <= rightEnd && rightStart <= leftEnd;
+
+export function validateRentChargePeriod(candidate: Pick<Charge, "id" | "contractId" | "periodStart" | "periodEnd" | "chargeType">, charges: Charge[]) {
+  if (candidate.periodStart > candidate.periodEnd) throw new Error("Конец периода начисления не может быть раньше начала");
+  if (candidate.chargeType !== "rent") return;
+  if (charges.some((charge) => charge.id !== candidate.id && charge.contractId === candidate.contractId && charge.chargeType === "rent" && charge.status !== "cancelled" && periodsOverlap(candidate.periodStart, candidate.periodEnd, charge.periodStart, charge.periodEnd))) {
+    throw new Error("Период аренды пересекается с существующим начислением");
+  }
+}
 
 export function syncContractPaymentSchedule(data: AppData, contractId: number) {
   const next = structuredClone(data);
@@ -349,15 +359,16 @@ export function syncContractPaymentSchedule(data: AppData, contractId: number) {
   const contractEnd = parseIsoDate(contract.endDate);
   let periodStart = parseIsoDate(contract.startDate);
   let dueDate = parseIsoDate(contract.firstPaymentDate || contract.startDate);
+  const dueOffsetDays = Math.round((periodStart.getTime() - dueDate.getTime()) / 86_400_000);
 
   while (periodStart <= contractEnd) {
     const nextStart = addMonthsClamped(periodStart, interval);
     const periodEnd = new Date(Math.min(contractEnd.getTime(), nextStart.getTime() - 86_400_000));
     const startValue = isoDate(periodStart);
-    const existing = next.charges.find((item) =>
-      item.contractId === contract.id && item.chargeType === "rent" && item.periodStart === startValue
+    const overlapping = next.charges.filter((item) =>
+      item.contractId === contract.id && item.chargeType === "rent" && item.status !== "cancelled" && periodsOverlap(startValue, isoDate(periodEnd), item.periodStart, item.periodEnd)
     );
-    if (!existing) {
+    if (!overlapping.length) {
       next.charges.push({
         id: Math.max(0, ...next.charges.map((item) => item.id)) + 1,
         contractId: contract.id,
@@ -369,6 +380,14 @@ export function syncContractPaymentSchedule(data: AppData, contractId: number) {
         status: "pending",
         note: `Автоматический график · период ${interval} мес.`
       });
+    } else {
+      const coveredUntil = overlapping.map((item) => item.periodEnd).sort().at(-1)!;
+      const uncoveredStart = addDays(parseIsoDate(coveredUntil), 1);
+      if (uncoveredStart > periodStart && uncoveredStart < nextStart) {
+        periodStart = uncoveredStart;
+        dueDate = addDays(uncoveredStart, -dueOffsetDays);
+        continue;
+      }
     }
     periodStart = nextStart;
     dueDate = addMonthsClamped(dueDate, interval);

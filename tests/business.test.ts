@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import QRCode from "qrcode";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitRentPaidThrough, unitStatus, validateActiveContract } from "../lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, ensureUnitStatusHistory, hasCompletePaymentSettings, normalizeObjectPhotoUrl, paymentSettingsErrors, paymentTaskDueDate, paymentPurpose, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitRentPaidThrough, unitStatus, validateActiveContract, validateRentChargePeriod } from "../lib/business";
 import { generateRentalContract, nextContractNumber } from "../lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, validateSignedContractUpload } from "../lib/contract-scans";
 import { findContractNumber, findPaymentPeriod } from "../lib/receipt-email";
@@ -248,6 +248,22 @@ test("квартальный договор создаёт график начи
       ["2027-05-15", "2027-08-14", "2027-05-10", 6000]
     ]
   );
+});
+
+test("автоматический график продолжает уже оплаченный длинный период без пересечения", () => {
+  const data = structuredClone(seedData);
+  data.contracts = [{ ...data.contracts[0], id: 70, startDate: "2026-04-06", endDate: "2027-04-06", monthlyRate: 2000, paymentIntervalMonths: 1, firstPaymentDate: "2026-04-06" }];
+  data.charges = [{ id: 80, contractId: 70, periodStart: "2026-04-06", periodEnd: "2026-10-06", dueDate: "2026-04-06", amount: 12000, chargeType: "rent", status: "paid", note: "" }];
+  data.payments = [{ id: 90, customerId: data.contracts[0].customerId, contractId: 70, chargeId: 80, paymentDate: "2026-04-06", amount: 12000, paymentMethod: "cash", referenceNumber: "", comment: "" }];
+  const result = syncContractPaymentSchedule(data, 70);
+  const generated = result.charges.filter((charge) => charge.id !== 80);
+  assert.equal(generated[0].periodStart, "2026-10-07");
+  assert.equal(generated[0].periodEnd, "2026-11-06");
+  assert.equal(result.charges.some((left, index) => result.charges.some((right, rightIndex) => index < rightIndex && left.periodStart <= right.periodEnd && right.periodStart <= left.periodEnd)), false);
+});
+
+test("ручное начисление аренды нельзя создать поверх существующего периода", () => {
+  assert.throws(() => validateRentChargePeriod({ id: 999, contractId: seedData.charges[0].contractId, periodStart: seedData.charges[0].periodStart, periodEnd: seedData.charges[0].periodEnd, chargeType: "rent" }, seedData.charges), /пересекается/);
 });
 
 test("ожидающая проверки Telegram-оплата не закрывает начисление", () => {

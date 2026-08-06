@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitOperatingCosts, unitRentPaidThrough, unitStatus, validateActiveContract } from "@/lib/business";
+import { buildPaymentQrPayload, calculateChargeStatus, chargePaidAmount, dashboardMetrics, effectiveChargeStatus, hasCompletePaymentSettings, money, normalizeObjectPhotoUrl, paymentPeriodLabel, paymentPurpose, paymentSettingsErrors, paymentTaskDueDate, portfolioAnalytics, recordUnitStatusChange, syncContractPaymentSchedule, syncMonthlyPaymentTasks, unitAnalytics, unitOperatingCosts, unitRentPaidThrough, unitStatus, validateActiveContract, validateRentChargePeriod } from "@/lib/business";
 import { contractPdfFileName, generateRentalContract, nextContractNumber } from "@/lib/contract-document";
 import { customerContractScans, eligibleContractsForScan, MAX_SIGNED_CONTRACTS_PER_CUSTOMER, validateSignedContractUpload } from "@/lib/contract-scans";
 import { deleteSignedContractFile, getSignedContractFile, storeSignedContractFile } from "@/lib/document-storage";
@@ -54,7 +54,7 @@ const titles: Record<Page, [string, string]> = {
 const statusText: Record<string, string> = {
   free: "Свободна", reserved: "Зарезервирована", occupied: "Занята", maintenance: "В ремонте", archived: "Архив",
   draft: "Черновик", active: "Активен", expired: "Истёк", terminated: "Расторгнут",
-  pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
+  planned: "Плановое", pending: "Ожидает", paid: "Оплачено", partial: "Частично", overdue: "Просрочено", cancelled: "Отменено",
   open: "Открыта", in_progress: "В работе", sent: "Отправлен", done: "Готово",
   pending_verification: "На проверке", confirmed: "Подтверждено"
 };
@@ -641,6 +641,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
 }) {
   const [filterLocationId, setFilterLocationId] = useState("all");
   const [filterUnitId, setFilterUnitId] = useState("all");
+  const [chargeScope, setChargeScope] = useState<"current" | "future" | "all">("current");
   const q = search.toLowerCase();
   const cell = (value: unknown) => String(value ?? "").toLowerCase().includes(q);
   let headers: string[] = [], rows: { id: number; cells: React.ReactNode[]; customerId?: number }[] = [];
@@ -666,7 +667,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
     rows = data.contracts.filter((x) => cell(x.contractNumber) || cell(data.customers.find((c) => c.id === x.customerId)?.fullName)).map((x) => ({ id: x.id, customerId: x.customerId, cells: [<strong key="n">{x.contractNumber}</strong>, data.customers.find((c) => c.id === x.customerId)?.fullName, data.units.find((u) => u.id === x.unitId)?.unitNumber, `${date(x.startDate)} — ${date(x.endDate)}`, money(x.monthlyRate), badge(x.status)] }));
   } else if (page === "charges") {
     headers = ["Объект · договор · плательщик", "Период", "Срок", "Сумма", "Оплачено", "Статус"];
-    rows = data.charges.filter((x) => {
+    rows = data.charges.filter((x) => chargeScope === "all" || (chargeScope === "future" ? x.periodStart > isoToday() : x.periodStart <= isoToday())).filter((x) => {
       const contract = data.contracts.find((c) => c.id === x.contractId);
       const unit = data.units.find((item) => item.id === contract?.unitId);
       const customer = data.customers.find((item) => item.id === contract?.customerId);
@@ -676,7 +677,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
       const unit = data.units.find((item) => item.id === contract.unitId);
       const location = data.locations.find((item) => item.id === unit?.locationId);
       const customer = data.customers.find((item) => item.id === contract.customerId);
-      return { id: x.id, customerId: contract.customerId, cells: [<span className="entity-info-cell" key="info"><strong>№ {unit?.unitNumber ?? "—"} · {contract.contractNumber}</strong><small>{location?.name ?? location?.address ?? "Локация не указана"} · {customer?.fullName ?? "Плательщик не найден"}</small></span>, `${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), badge(effectiveChargeStatus(x.id, data, new Date("2026-07-19")))] };
+      return { id: x.id, customerId: contract.customerId, cells: [<span className="entity-info-cell" key="info"><strong>№ {unit?.unitNumber ?? "—"} · {contract.contractNumber}</strong><small>{location?.name ?? location?.address ?? "Локация не указана"} · {customer?.fullName ?? "Плательщик не найден"}</small></span>, `${date(x.periodStart)} — ${date(x.periodEnd)}`, date(x.dueDate), money(x.amount), money(chargePaidAmount(x.id, data)), x.periodStart > isoToday() ? badge("planned") : badge(effectiveChargeStatus(x.id, data, new Date()))] };
     });
   } else if (page === "payments") {
     headers = ["Дата", "Кладовая", "Плательщик · договор", "Способ", "Номер", "Сумма", "Статус"];
@@ -731,7 +732,7 @@ function Registry({ page, data, search, setSearch, mode, setMode, drilldown, onC
     <section>
       {drilldown && <div className="active-filter"><span>Показано: <strong>{drilldown.label}</strong> · {rows.length}</span><button onClick={onClearDrilldown}>Показать все<X size={14} /></button></div>}
       {showEntityFilters && <div className="entity-filters"><label>Адрес<select value={filterLocationId} onChange={(event) => { setFilterLocationId(event.target.value); setFilterUnitId("all"); }}><option value="all">Все адреса</option>{data.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Объект<select value={filterUnitId} onChange={(event) => setFilterUnitId(event.target.value)}><option value="all">Все объекты</option>{filterUnits.map((unit) => <option key={unit.id} value={unit.id}>№ {unit.unitNumber}</option>)}</select></label></div>}
-      <div className="registry-toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск…" /></label><select value={mode} onChange={(event) => setMode(event.target.value as "active" | "archived" | "all")}><option value="all">Все записи</option><option value="active">Активные</option><option value="archived">Архивные</option></select></div>
+      <div className="registry-toolbar"><label className="search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск…" /></label>{page === "charges" && <select value={chargeScope} onChange={(event) => setChargeScope(event.target.value as "current" | "future" | "all")}><option value="current">Текущие и прошлые</option><option value="future">Будущие плановые</option><option value="all">Все периоды</option></select>}<select value={mode} onChange={(event) => setMode(event.target.value as "active" | "archived" | "all")}><option value="all">Все записи</option><option value="active">Активные</option><option value="archived">Архивные</option></select></div>
       <div className="table-card"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>
         {rows.map((row) => <tr key={row.id} onClick={() => page === "payments" ? onPayment(row.id) : row.customerId ? onCustomer(row.customerId) : onEdit(row.id)}>
           {row.cells.map((value, index) => <td key={index}>{value}</td>)}
@@ -1810,7 +1811,11 @@ function EntityModal({ modal, data, onClose, onSave }: { modal: Exclude<Modal, n
           next.units.find((unit) => unit.id === candidate.unitId)!.status = "occupied";
           next = recordUnitStatusChange(next, candidate.unitId, "occupied", new Date(`${candidate.startDate}T12:00:00`));
         }
-      } else if (modal.type === "charges") upsert(next.charges, { id: modal.id ?? nextId(next.charges), contractId: Number(input(form, "contractId")), periodStart: input(form, "periodStart"), periodEnd: input(form, "periodEnd"), dueDate: input(form, "dueDate"), amount: Number(input(form, "amount")), chargeType: input(form, "chargeType") as "rent", status: (editing?.status as "pending" | undefined) ?? "pending", note: input(form, "note") });
+      } else if (modal.type === "charges") {
+        const candidate = { id: modal.id ?? nextId(next.charges), contractId: Number(input(form, "contractId")), periodStart: input(form, "periodStart"), periodEnd: input(form, "periodEnd"), dueDate: input(form, "dueDate"), amount: Number(input(form, "amount")), chargeType: input(form, "chargeType") as "rent", status: (editing?.status as "pending" | undefined) ?? "pending", note: input(form, "note") };
+        validateRentChargePeriod(candidate, next.charges);
+        upsert(next.charges, candidate);
+      }
       else if (modal.type === "payments") {
         const chargeIds = input(form, "chargeIds").split(",").map(Number).filter(Boolean);
         const paymentAmount = Number(input(form, "amount"));

@@ -173,6 +173,7 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .badge { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 8px; font-size: 9px; background: #eef0f2; color: #5f6670; white-space: nowrap; }
 .badge-active, .badge-paid, .badge-free, .badge-occupied { color: var(--success); background: #e9f2eb; }
 .badge-sent { color: #315f88; background: #e9f1f8; }
+.badge-planned { color: #59626d; background: #edf0f3; }
 .badge-overdue, .badge-terminated { color: var(--danger); background: #f8eae9; }
 .badge-pending, .badge-partial, .badge-maintenance, .badge-draft { color: var(--warning); background: #f7f0e4; }
 .danger-text { color: var(--danger); }
