@@ -250,6 +250,16 @@ test("квартальный договор создаёт график начи
   );
 });
 
+test("при предоплате первый будущий платёж начинает новый оплачиваемый период", () => {
+  const data = structuredClone(seedData);
+  data.charges = [];
+  data.payments = [];
+  data.contracts = [{ ...data.contracts[0], id: 60, startDate: "2026-07-01", endDate: "2027-07-01", monthlyRate: 2000, paymentIntervalMonths: 1, firstPaymentDate: "2026-08-01" }];
+  const result = syncContractPaymentSchedule(data, 60);
+  assert.deepEqual([result.charges[0].periodStart, result.charges[0].periodEnd, result.charges[0].dueDate], ["2026-08-01", "2026-08-31", "2026-08-01"]);
+  assert.deepEqual([result.charges[1].periodStart, result.charges[1].periodEnd, result.charges[1].dueDate], ["2026-09-01", "2026-09-30", "2026-09-01"]);
+});
+
 test("автоматический график продолжает уже оплаченный длинный период без пересечения", () => {
   const data = structuredClone(seedData);
   data.contracts = [{ ...data.contracts[0], id: 70, startDate: "2026-04-06", endDate: "2027-04-06", monthlyRate: 2000, paymentIntervalMonths: 1, firstPaymentDate: "2026-04-06" }];
@@ -263,7 +273,11 @@ test("автоматический график продолжает уже оп
 });
 
 test("ручное начисление аренды нельзя создать поверх существующего периода", () => {
-  assert.throws(() => validateRentChargePeriod({ id: 999, contractId: seedData.charges[0].contractId, periodStart: seedData.charges[0].periodStart, periodEnd: seedData.charges[0].periodEnd, chargeType: "rent" }, seedData.charges), /пересекается/);
+  assert.throws(() => validateRentChargePeriod({ id: 999, contractId: seedData.charges[0].contractId, periodStart: seedData.charges[0].periodStart, periodEnd: seedData.charges[0].periodEnd, dueDate: seedData.charges[0].periodStart, chargeType: "rent" }, seedData.charges), /пересекается/);
+});
+
+test("ручное начисление аренды не допускает постоплату", () => {
+  assert.throws(() => validateRentChargePeriod({ id: 999, contractId: 999, periodStart: "2026-08-01", periodEnd: "2026-08-31", dueDate: "2026-09-01", chargeType: "rent" }, []), /предоплате/);
 });
 
 test("ожидающая проверки Telegram-оплата не закрывает начисление", () => {

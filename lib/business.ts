@@ -343,9 +343,10 @@ const addMonthsClamped = (date: Date, months: number) => {
 const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12);
 const periodsOverlap = (leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) => leftStart <= rightEnd && rightStart <= leftEnd;
 
-export function validateRentChargePeriod(candidate: Pick<Charge, "id" | "contractId" | "periodStart" | "periodEnd" | "chargeType">, charges: Charge[]) {
+export function validateRentChargePeriod(candidate: Pick<Charge, "id" | "contractId" | "periodStart" | "periodEnd" | "dueDate" | "chargeType">, charges: Charge[]) {
   if (candidate.periodStart > candidate.periodEnd) throw new Error("Конец периода начисления не может быть раньше начала");
   if (candidate.chargeType !== "rent") return;
+  if (candidate.dueDate > candidate.periodStart) throw new Error("При предоплате срок оплаты не может быть позже начала периода аренды");
   if (charges.some((charge) => charge.id !== candidate.id && charge.contractId === candidate.contractId && charge.chargeType === "rent" && charge.status !== "cancelled" && periodsOverlap(candidate.periodStart, candidate.periodEnd, charge.periodStart, charge.periodEnd))) {
     throw new Error("Период аренды пересекается с существующим начислением");
   }
@@ -357,8 +358,10 @@ export function syncContractPaymentSchedule(data: AppData, contractId: number) {
   if (!contract?.paymentIntervalMonths || contract.status === "draft") return next;
   const interval = contract.paymentIntervalMonths;
   const contractEnd = parseIsoDate(contract.endDate);
-  let periodStart = parseIsoDate(contract.startDate);
-  let dueDate = parseIsoDate(contract.firstPaymentDate || contract.startDate);
+  const contractStart = parseIsoDate(contract.startDate);
+  const firstPaymentDate = parseIsoDate(contract.firstPaymentDate || contract.startDate);
+  let periodStart = firstPaymentDate > contractStart ? firstPaymentDate : contractStart;
+  let dueDate = firstPaymentDate;
   const dueOffsetDays = Math.round((periodStart.getTime() - dueDate.getTime()) / 86_400_000);
 
   while (periodStart <= contractEnd) {
