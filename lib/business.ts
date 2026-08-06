@@ -157,7 +157,14 @@ export function unitOperatingCosts(data: AppData, unitId: number): UnitOperating
 export function unitRentPaidThrough(data: AppData, unitId: number) {
   const contractIds = data.contracts.filter((contract) => contract.unitId === unitId).map((contract) => contract.id);
   return data.charges
-    .filter((charge) => contractIds.includes(charge.contractId) && charge.chargeType === "rent" && charge.status !== "cancelled" && chargePaidAmount(charge.id, data) >= charge.amount)
+    .filter((charge) => {
+      if (!contractIds.includes(charge.contractId) || charge.chargeType !== "rent" || charge.status === "cancelled") return false;
+      const linked = chargePaidAmount(charge.id, data);
+      const legacyUnlinked = data.payments
+        .filter((payment) => payment.chargeId === null && payment.contractId === charge.contractId && payment.status !== "pending_verification" && payment.paymentDate === charge.periodStart)
+        .reduce((sum, payment) => sum + payment.amount, 0);
+      return linked + legacyUnlinked >= charge.amount;
+    })
     .map((charge) => charge.periodEnd)
     .sort()
     .at(-1) ?? null;

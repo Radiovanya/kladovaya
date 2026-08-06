@@ -30,6 +30,15 @@ test("показывается последний полностью оплач�
   assert.equal(unitRentPaidThrough(seedData, unitId), paidCharge?.periodEnd ?? null);
 });
 
+test("старый платёж без chargeId закрывает совпадающий период для аналитики", () => {
+  const data = structuredClone(seedData);
+  const charge = data.charges[0];
+  const payment = data.payments.find((item) => item.chargeId === charge.id)!;
+  payment.chargeId = null;
+  payment.paymentDate = charge.periodStart;
+  assert.equal(unitRentPaidThrough(data, data.contracts.find((contract) => contract.id === charge.contractId)!.unitId), charge.periodEnd);
+});
+
 test("ручной статус ремонта сохраняется", () => {
   assert.equal(unitStatus(4, seedData), "maintenance");
 });
